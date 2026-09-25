@@ -111,6 +111,7 @@ SRT / RTMP decoder bring-up vs AIDA camera:
 ## Embed / modules
 
 - **NDI\|HX only:** **[docs/integration.md](docs/integration.md)** (`libghost_ndihx`)
+- **NDI discovery:** **[docs/ndi-discovery.md](docs/ndi-discovery.md)** · **RTSP/SRT discovery (none):** **[docs/rtsp-srt-discovery.md](docs/rtsp-srt-discovery.md)**
 - **Pluggable shell contract:** **[docs/modular-compatibility.md](docs/modular-compatibility.md)**
 
 ```c

@@ -151,6 +151,7 @@ void ghost_rtsp_session_destroy(ghost_rtsp_session_t *session) {
   free(session);
 }
 
+/* URL synthesis only — no ONVIF/mDNS advertiser on show cams (see docs/rtsp-srt-discovery.md). */
 int ghost_rtsp_discover(ghost_rtsp_session_t *session, ghost_rtsp_source_t *out, int cap,
                        int wait_ms) {
   (void)wait_ms;

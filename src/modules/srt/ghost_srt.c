@@ -150,6 +150,7 @@ void ghost_srt_session_destroy(ghost_srt_session_t *session) {
   free(session);
 }
 
+/* URL synthesis only — SRT has no Bonjour/SDK LAN finder (see docs/rtsp-srt-discovery.md). */
 int ghost_srt_discover(ghost_srt_session_t *session, ghost_srt_source_t *out, int cap,
                        int wait_ms) {
   (void)wait_ms;
