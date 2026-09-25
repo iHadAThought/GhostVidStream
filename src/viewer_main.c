@@ -15,6 +15,15 @@
 
 #include <SDL.h>
 
+/* Alpine 3.20 / older SDL2: BGRX32 may be missing; BGRX8888 is the classic alias. */
+#ifndef SDL_PIXELFORMAT_BGRX32
+#  ifdef SDL_PIXELFORMAT_BGRX8888
+#    define SDL_PIXELFORMAT_BGRX32 SDL_PIXELFORMAT_BGRX8888
+#  else
+#    define SDL_PIXELFORMAT_BGRX32 SDL_PIXELFORMAT_BGRA32
+#  endif
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

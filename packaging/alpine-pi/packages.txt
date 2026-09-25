@@ -34,8 +34,8 @@ libstdc++
 mesa-dri-gallium
 mesa-gbm
 libdrm
-libegl
-libgl
+mesa-egl
+mesa-gl
 sdl2
 ffmpeg-libs
 ffmpeg
@@ -60,8 +60,9 @@ gawk
 bash
 shadow
 haveged
-libcap2
+libcap
 alsa-lib
+raspberrypi-userland
 # Build-time only (image host / chroot build stage — not required on final flash if binaries prebuilt)
 # build-base
 # pkgconf

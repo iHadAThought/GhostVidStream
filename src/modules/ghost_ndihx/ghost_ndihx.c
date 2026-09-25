@@ -12,6 +12,9 @@
  *  - No UI deps — safe to link from Electron, Qt, Python ctypes, etc.
  *  - Portable aarch64 and x86_64 Linux (libndi path chosen by install-deps.sh).
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "ghost_ndihx.h"
 #include "media_core.h"
 

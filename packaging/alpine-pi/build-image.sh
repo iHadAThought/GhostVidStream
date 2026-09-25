@@ -159,12 +159,15 @@ EOF
 
 # Overlay (configs, OpenRC, web UI)
 log "Applying rootfs-overlay…"
-(cd "$OVERLAY" && tar -cf - .) | (cd "$ROOTFS" && tar -xf -)
+[[ -d "$OVERLAY/etc/init.d" ]] || die "overlay missing: $OVERLAY"
+cp -a "${OVERLAY}/." "${ROOTFS}/"
+test -f "${ROOTFS}/etc/init.d/ghostvidstream" || die "overlay did not install etc/init.d/ghostvidstream"
 chmod 755 "${ROOTFS}/etc/init.d/ghostvidstream" \
   "${ROOTFS}/etc/init.d/ghostvidstream-web" \
   "${ROOTFS}/etc/local.d/ghostvidstream.start" \
   "${ROOTFS}/usr/local/bin/gvs-apply-profile" \
-  "${ROOTFS}/usr/local/bin/ghostvidstream-web"
+  "${ROOTFS}/usr/local/bin/ghostvidstream-web" \
+  "${ROOTFS}/usr/local/bin/ghostvidstream-kiosk"
 chroot "$ROOTFS" /bin/sh -c '
   rc-update add ghostvidstream default
   rc-update add ghostvidstream-web default
@@ -172,7 +175,7 @@ chroot "$ROOTFS" /bin/sh -c '
 '
 
 # Build / install GhostVidStream into rootfs (decode binaries only)
-log "Building GhostVidStream inside chroot…"
+log "Staging GhostVidStream sources…"
 mkdir -p "${ROOTFS}/opt/ghostvidstream-src"
 # Copy sources (exclude heavy/local artifacts)
 tar -C "$GVS_SRC" \
@@ -181,52 +184,81 @@ tar -C "$GVS_SRC" \
   --exclude 'packaging/alpine-pi/out' \
   -cf - . | tar -C "${ROOTFS}/opt/ghostvidstream-src" -xf -
 
-# Optional NDI SDK (glibc) under /usr/local — required for ghost_ndihx; SRT/RTMP/RTSP work without it.
+# Optional NDI SDK (glibc) under /opt/ndi — never dump into musl's default
+# /usr/local/lib or apk/chroot breaks with "Error relocating /sbin/apk".
+# Runtime: gcompat + DT_RUNPATH=/opt/ndi/lib.
 if [[ "$SKIP_NDI" != "1" ]]; then
-  log "Fetching NDI SDK (glibc; runtime via gcompat)…"
-  ndi_tgz="${CACHE}/Install_NDI_SDK_v6_Linux.tar.gz"
-  if [[ ! -f "$ndi_tgz" ]]; then
-    curl -fL --retry 3 -o "${ndi_tgz}.partial" "$NDI_INSTALLER_URL" || die "NDI SDK download failed (set SKIP_NDI=1 for URL-only image)"
-    mv "${ndi_tgz}.partial" "$ndi_tgz"
+  log "Installing NDI SDK into /opt/ndi (glibc; runtime via gcompat)…"
+  install -d "${ROOTFS}/opt/ndi/lib" "${ROOTFS}/opt/ndi/include"
+  ndi_lib_src=""
+  ndi_inc_src=""
+  # Prefer host booth SDK if present (fast, already licensed/extracted).
+  if [[ -f /usr/local/lib/libndi.so.6 ]] || [[ -f /usr/local/lib/libndi.so ]]; then
+    ndi_lib_src=/usr/local/lib
+    [[ -d /usr/local/include ]] && ndi_inc_src=/usr/local/include
+    log "Using host NDI libs from ${ndi_lib_src}"
+  else
+    ndi_tgz="${CACHE}/Install_NDI_SDK_v6_Linux.tar.gz"
+    if [[ ! -f "$ndi_tgz" ]]; then
+      curl -fL --retry 3 -o "${ndi_tgz}.partial" "$NDI_INSTALLER_URL" || die "NDI SDK download failed (set SKIP_NDI=1 for URL-only image)"
+      mv "${ndi_tgz}.partial" "$ndi_tgz"
+    fi
+    ndi_tmp="${WORK_DIR}/ndi-sdk"
+    rm -rf "$ndi_tmp"; mkdir -p "$ndi_tmp"
+    tar -xzf "$ndi_tgz" -C "$ndi_tmp"
+    installer="$(find "$ndi_tmp" -type f -name 'Install_NDI_SDK_v6_Linux.sh' | head -n1)"
+    [[ -n "$installer" ]] || die "NDI installer script not found in tarball"
+    (cd "$(dirname "$installer")" && yes | sh "$(basename "$installer")" >/dev/null) || true
+    ndi_root="$(find "$ndi_tmp" -type d -name 'NDI SDK for Linux' | head -n1 || true)"
+    if [[ -z "$ndi_root" ]]; then
+      ndi_root="$(find / -maxdepth 3 -type d -name 'NDI SDK for Linux' 2>/dev/null | head -n1 || true)"
+    fi
+    [[ -n "$ndi_root" ]] || die "NDI SDK tree not found after install"
+    ndi_lib_src="${ndi_root}/lib/aarch64-rpi4-linux-gnueabi"
+    [[ -d "$ndi_lib_src" ]] || ndi_lib_src="$(find "${ndi_root}/lib" -maxdepth 1 -type d -name 'aarch64*' | head -n1)"
+    [[ -d "$ndi_lib_src" ]] || die "NDI aarch64 lib dir missing"
+    [[ -d "${ndi_root}/include" ]] && ndi_inc_src="${ndi_root}/include"
   fi
-  ndi_tmp="${WORK_DIR}/ndi-sdk"
-  rm -rf "$ndi_tmp"; mkdir -p "$ndi_tmp"
-  tar -xzf "$ndi_tgz" -C "$ndi_tmp"
-  installer="$(find "$ndi_tmp" -type f -name 'Install_NDI_SDK_v6_Linux.sh' | head -n1)"
-  [[ -n "$installer" ]] || die "NDI installer script not found in tarball"
-  # Non-interactive extract: the official installer is a shell self-extractor; accept license via yes.
-  (cd "$(dirname "$installer")" && yes | sh "$(basename "$installer")" >/dev/null) || true
-  ndi_root="$(find "$ndi_tmp" -type d -name 'NDI SDK for Linux' | head -n1 || true)"
-  if [[ -z "$ndi_root" ]]; then
-    ndi_root="$(find / -maxdepth 3 -type d -name 'NDI SDK for Linux' 2>/dev/null | head -n1 || true)"
+  # Copy only NDI-related shared objects + headers (avoid polluting with unrelated host libs).
+  shopt -s nullglob
+  for f in "${ndi_lib_src}"/libndi.so*; do
+    cp -a "$f" "${ROOTFS}/opt/ndi/lib/"
+  done
+  shopt -u nullglob
+  [[ -e "${ROOTFS}/opt/ndi/lib/libndi.so" || -e "${ROOTFS}/opt/ndi/lib/libndi.so.6" ]] \
+    || die "libndi.so* not found under ${ndi_lib_src}"
+  if [[ -n "$ndi_inc_src" ]]; then
+    # Prefer Processing.NDI.* headers if present; else copy whole include tree subset.
+    if compgen -G "${ndi_inc_src}/Processing.NDI.*" >/dev/null; then
+      cp -a "${ndi_inc_src}"/Processing.NDI.* "${ROOTFS}/opt/ndi/include/"
+    else
+      cp -a "${ndi_inc_src}/." "${ROOTFS}/opt/ndi/include/"
+    fi
   fi
-  [[ -n "$ndi_root" ]] || die "NDI SDK tree not found after install"
-  libdir="${ndi_root}/lib/aarch64-rpi4-linux-gnueabi"
-  [[ -d "$libdir" ]] || libdir="$(find "${ndi_root}/lib" -maxdepth 1 -type d -name 'aarch64*' | head -n1)"
-  [[ -d "$libdir" ]] || die "NDI aarch64 lib dir missing"
-  install -d "${ROOTFS}/usr/local/lib" "${ROOTFS}/usr/local/include"
-  cp -a "${libdir}/." "${ROOTFS}/usr/local/lib/"
-  if [[ -d "${ndi_root}/include" ]]; then
-    cp -a "${ndi_root}/include/." "${ROOTFS}/usr/local/include/"
-  fi
-  echo "/usr/local/lib" >"${ROOTFS}/etc/ld-musl-aarch64.path.d/usr-local.conf" 2>/dev/null \
-    || echo "/usr/local/lib" >>"${ROOTFS}/etc/ld-musl-aarch64.path"
+  # gcompat wrapper hint for kiosk env
+  mkdir -p "${ROOTFS}/etc/profile.d"
+  cat >"${ROOTFS}/etc/profile.d/gvs-ndi.sh" <<'EOF'
+export LD_LIBRARY_PATH="/opt/ndi/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+EOF
 fi
 
 # Build tools in chroot for compile, then leave runtime libs
+log "Building GhostVidStream inside chroot…"
 chroot "$ROOTFS" /bin/sh -c '
   set -e
   apk add --no-cache build-base pkgconf sdl2-dev ffmpeg-dev libsrt-dev
   cd /opt/ghostvidstream-src
-  export PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/local/lib/pkgconfig
-  export LDFLAGS="-L/usr/local/lib -Wl,-rpath,/usr/local/lib"
+  export PKG_CONFIG_PATH=/usr/lib/pkgconfig
+  export CFLAGS="-O2 -Wall -Wextra -Wno-unused-parameter -Iinclude -I/usr/local/include -I/opt/ndi/include"
+  export LDFLAGS="-L/opt/ndi/lib -Wl,-rpath,/opt/ndi/lib -L/usr/local/lib -Wl,-rpath,/usr/local/lib"
   make clean || true
   make -j"$(nproc)" all
   make install PREFIX=/usr/local
+  test -x /usr/local/bin/ghostvidstream
   # Drop build-only packages to keep appliance lean (decode runtime remains)
   apk del build-base pkgconf sdl2-dev ffmpeg-dev libsrt-dev || true
   # Keep runtime: sdl2, ffmpeg-libs, libsrt, gcompat
-'
+' || die "chroot GhostVidStream build failed"
 
 # Ensure no accidental encoder-ish services
 chroot "$ROOTFS" /bin/sh -c '
