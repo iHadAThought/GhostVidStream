@@ -2,11 +2,11 @@
 Type=Application
 Version=1.0
 Name=GhostVidStream
-GenericName=GhostVidStream NDI|HX Viewer
-Comment=GhostVidStream — auto-discover and view NDI|HX sources on the LAN
+GenericName=Multi-protocol video viewer
+Comment=GhostVidStream — multi-protocol video receive shell (NDI|HX first; more modules coming)
 Exec=ghostvidstream --auto
 Icon=ghostvidstream
 Terminal=false
 Categories=AudioVideo;Video;
-Keywords=GhostVidStream;NDI;HX;video;camera;booth;
+Keywords=GhostVidStream;video;viewer;NDI;HX;2110;RTSP;camera;booth;
 StartupNotify=true

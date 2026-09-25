@@ -1,10 +1,11 @@
 /**
  * @file viewer_main.c
- * @brief GhostVidStream — reference SDL2 viewer built on libghost_ndihx.
+ * @brief GhostVidStream — multi-protocol SDL2 receive / viewer shell.
  *
- * Light overlays (controls + stats HUD + capability-gated PTZ) drawn on top of
- * live video — no GTK/Qt. Demo / booth tool; product apps should link libghost_ndihx
- * (see docs/integration.md).
+ * First wired decoder plugin: libghost_ndihx (NDI|HX). FULL NDI / 2110 / RTSP
+ * modules are planned behind media_core. Light overlays (controls + stats HUD +
+ * capability-gated PTZ) — no GTK/Qt. Embeds that only need one protocol should
+ * link that module directly (see docs/integration.md / modular-compatibility.md).
  */
 #include "ghost_ndihx.h"
 #include "media_core.h"
@@ -290,7 +291,9 @@ static void layout_controls(SDL_Renderer *ren, UiState *ui, ViewerOptions *vo,
   draw_label(ren, x, y, PRODUCT_NAME "  (c)");
   SDL_Rect close = {panel.x + panel.w - 36, panel.y + 8, 28, 24};
   draw_button(ren, ui, HIT_CLOSE_CONTROLS, close, "X", false);
-  y += 28;
+  y += 22;
+  draw_label(ren, x, y, "Shell · decoder: libghost_ndihx (NDI|HX)");
+  y += 22;
 
   char hzbuf[64];
   snprintf(hzbuf, sizeof(hzbuf), "Source Hz ~ %.2f (sender)", src_fps);
@@ -368,10 +371,11 @@ static void layout_controls(SDL_Renderer *ren, UiState *ui, ViewerOptions *vo,
 
 static void usage(const char *argv0) {
   fprintf(stderr,
-          "%s — NDI|HX viewer (libghost_ndihx)\n"
+          "%s — multi-protocol video receive shell\n"
+          "First decoder plugin: libghost_ndihx (NDI|HX). Planned: FULL NDI, 2110, RTSP.\n"
           "Usage: %s [options]\n"
           "\n"
-          "Discovery / connect (libghost_ndihx)\n"
+          "Discovery / connect (active module: libghost_ndihx)\n"
           "  --list              List sources and exit\n"
           "  --auto / --no-auto  Keep searching (default: auto)\n"
           "  --source NAME       Prefer name/url substring\n"
@@ -381,8 +385,8 @@ static void usage(const char *argv0) {
           "  --rescan-ms N       Auto-search pause ms (default 3000)\n"
           "  --noframe-ms N      Reconnect if silent this long (default 8000)\n"
           "\n"
-          "Efficiency / display (%s)\n"
-          "  --bandwidth MODE    highest|lowest\n"
+          "Efficiency / display (%s shell)\n"
+          "  --bandwidth MODE    highest|lowest (NDI|HX module)\n"
           "  --max-w N --max-h N Cap letterboxed display size (0=window)\n"
           "  --fps-cap N         Cap present rate (0=uncapped)\n"
           "  --hz N              Display refresh hint (0=default)\n"
@@ -790,8 +794,8 @@ int main(int argc, char **argv) {
   if (!vo.lib.recv_name[0] || !strcmp(vo.lib.recv_name, GHOST_NDIHX_DEFAULT_RECV_NAME))
     snprintf(vo.lib.recv_name, sizeof(vo.lib.recv_name), "%s", PRODUCT_NAME);
 
-  fprintf(stderr, "%s %s (libghost_ndihx %s, media_core %s)\n", PRODUCT_NAME, VIEWER_VERSION,
-          ghost_ndihx_version(), media_core_version());
+  fprintf(stderr, "%s %s — multi-protocol shell (active decoder: libghost_ndihx %s, media_core %s)\n",
+          PRODUCT_NAME, VIEWER_VERSION, ghost_ndihx_version(), media_core_version());
 
   ghost_ndihx_session_t *session = ghost_ndihx_session_create(&vo.lib);
   if (!session) {

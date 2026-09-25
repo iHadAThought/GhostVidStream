@@ -1,30 +1,37 @@
 # GhostVidStream
 
-**GhostVidStream** is the product name for this low-latency **NDI|HX** receive stack on
-**Linux aarch64 and x86_64**.
+**GhostVidStream** is a multi-protocol **video receive / viewer shell** for
+**Linux aarch64 and x86_64**. Protocol decoders plug in behind a shared
+`media_core` API; hosts get newest-frame BGRX (or module-documented pixels),
+optional PTZ when the active module advertises it, and a common settings surface.
 
 | Piece | What it is |
 | --- | --- |
 | **GhostVidStream** | Product / SDL reference viewer + desktop launcher |
-| `libghost_ndihx` (`ghost_ndihx.h`, `ghost_ndihx_*`) | Embeddable C library — NDI\|HX focused, no GUI |
 | `libmedia_core` | Protocol-agnostic module registry + PTZ capability contract |
+| `libghost_ndihx` (`ghost_ndihx.h`, `ghost_ndihx_*`) | **First** plug-in decoder — NDI\|HX only (no GUI) |
+| Planned modules | FULL NDI · SMPTE 2110 · RTSP (placeholders under `src/modules/`) |
 | Desktop launcher | **GhostVidStream** → `ghostvidstream --auto` |
-| `install-deps.sh` | Installs libndi (SDK v6) + FFmpeg ≥ 7 + SDL2 build deps |
+| `install-deps.sh` | Today: libndi (SDK v6) + FFmpeg ≥ 7 + SDL2 (NDI\|HX module deps) |
 
-Technical names (stable for embeds): **`libghost_ndihx`** / **`ghost_ndihx.h`** /
-**`ghost_ndihx_*`**. The viewer binary is **`ghostvidstream`** (symlink
-`ndi-hx-viewer` kept for old habits).
+The viewer binary is **`ghostvidstream`** (symlink `ndi-hx-viewer` kept for old
+habits). Embeds that only need NDI\|HX should link **`libghost_ndihx`** directly
+— see that library’s docs / BookStack book. Multi-protocol hosts should prefer
+`media_core` + registered modules:
+**[docs/modular-compatibility.md](docs/modular-compatibility.md)** (architecture
+plan: store `modular-protocol-plan.md`).
 
-Camera encode (resolution / fps / Hz on the wire) is controlled by the **sender**.
-This project optimizes the **receiver**: newest-frame drain, optional low bandwidth,
-auto LAN search, and display-side caps in GhostVidStream.
+**Today’s wired decoder** is NDI\|HX via `libghost_ndihx`. Camera encode
+(resolution / fps / Hz on the wire) stays on the **sender**. This project owns
+the **receiver shell**: discovery, newest-frame drain, bandwidth where the
+module supports it, and display-side caps in the viewer.
 
-Validated against `HD-NDI-X20 (HX-Stream-172.16.1.189)` on Ubuntu aarch64.
+Validated NDI\|HX path: `HD-NDI-X20 (HX-Stream-172.16.1.189)` on Ubuntu aarch64.
 
 ## Quick start (Linux)
 
 ```bash
-./install-deps.sh          # needs sudo; /usr/local
+./install-deps.sh          # needs sudo; /usr/local (NDI|HX module deps today)
 make                       # libmedia_core.a + libghost_ndihx.a + ghostvidstream
 sudo make install          # headers, .a, binary, icon, .desktop → /usr/local
 
@@ -35,7 +42,7 @@ sudo make install          # headers, .a, binary, icon, .desktop → /usr/local
 # Legacy: ndi-hx-viewer → same binary
 ```
 
-Prefer a wired NDI/General NIC. VMs without a GPU decode in software (higher CPU).
+Prefer a wired media/General NIC. VMs without a GPU decode in software (higher CPU).
 
 ## Viewer settings
 
@@ -44,7 +51,7 @@ Prefer a wired NDI/General NIC. VMs without a GPU decode in software (higher CPU
 | `--auto` / `auto_search` | Keep scanning until a camera matches; reconnect on silence |
 | `--ip` / `ip` | Prefer source whose name/url contains this host |
 | `--source` / `source` | Prefer name/url substring |
-| `--bandwidth` / `bandwidth` | `highest` or `lowest` (lighter decode) |
+| `--bandwidth` / `bandwidth` | `highest` or `lowest` (NDI\|HX module) |
 | `--max-w` `--max-h` | Cap letterboxed display size |
 | `--fps-cap` / `fps_cap` | Cap present rate (CPU) |
 | `--hz` / `hz` | Best-effort display refresh hint |
@@ -60,11 +67,11 @@ Prefer a wired NDI/General NIC. VMs without a GPU decode in software (higher CPU
 | `f` | Fullscreen |
 | Space | Pause |
 | `r` | Rescan / reconnect |
-| `[` / `]` | Bandwidth lowest / highest |
+| `[` / `]` | Bandwidth lowest / highest (when module supports it) |
 | `-` / `=` | FPS cap step · `0` uncapped |
 
 Controls overlay also exposes auto-search, max W/H, rescan, stats checkbox, and a
-**PTZ pad** only when the active module reports `MEDIA_CAP_PTZ` (NDI|HX probes
+**PTZ pad** only when the active module reports `MEDIA_CAP_PTZ` (NDI\|HX probes
 `NDIlib_recv_ptz_is_supported` after connect). Pure receive sources show no PTZ chrome.
 
 ## Latency & leaks
@@ -73,53 +80,60 @@ Controls overlay also exposes auto-search, max W/H, rescan, stats checkbox, and 
   (also continues past NDI `status_change` so PTZ/capability events cannot strand
   stale frames). `ghost_ndihx_drain()` discards the queue when the host is paused.
 - Audio/metadata are not pulled (lower overhead for video-only monitors).
-- Default bandwidth is **highest** (full sender resolution, BGRX). `lowest` is an
-  explicit opt-in — never a silent quality drop.
+- Default bandwidth on the NDI\|HX module is **highest** (full sender resolution,
+  BGRX). `lowest` is an explicit opt-in — never a silent quality drop.
 - Vsync off in GhostVidStream; optional fps-cap when you want less CPU.
 - Tear down with `ghost_ndihx_session_destroy` (frees last frame + receiver + finder).
 
-## Embed in other apps
+## Resource usage
 
-See **[docs/integration.md](docs/integration.md)** for the full implement-in-another-app
-guide (API map, link flags, threading, PTZ, aarch64/x86_64). Modular hosts:
-**[docs/modular-compatibility.md](docs/modular-compatibility.md)**.
+Steady-state CPU / RSS / threads on the aarch64 booth host (no stream · low ·
+max quality · HUD overlays): **[docs/resource-usage.md](docs/resource-usage.md)**.
+
+## Embed / modules
+
+- **NDI\|HX only:** **[docs/integration.md](docs/integration.md)** (`libghost_ndihx`)
+- **Pluggable shell contract:** **[docs/modular-compatibility.md](docs/modular-compatibility.md)**
 
 ```c
 #include <ghost_ndihx.h>
-/* ghost_ndihx_session_create → ghost_ndihx_connect_auto → ghost_ndihx_capture_newest */
+/* First module today: ghost_ndihx_session_create → connect_auto → capture_newest */
 /* Pause path: ghost_ndihx_drain(session) so the receive queue cannot grow */
-/* Optional: ghost_ndihx_capabilities / ghost_ndihx_ptz_* when MEDIA_CAP_PTZ */
 ```
 
-Link: `-lghost_ndihx -lmedia_core -lndi -ldl -lpthread -lm` (plus rpath to `PREFIX/lib`).
+Link (NDI\|HX module): `-lghost_ndihx -lmedia_core -lndi -ldl -lpthread -lm`
+(plus rpath to `PREFIX/lib`).
 
 ## Architectures
 
 `install-deps.sh` and the Makefile are arch-portable:
 
-- **aarch64 / arm64** → NDI `lib/aarch64-rpi4-linux-gnueabi`
+- **aarch64 / arm64** → NDI `lib/aarch64-rpi4-linux-gnueabi` (HX module)
 - **x86_64 / amd64** → NDI `lib/x86_64-linux-gnu`
 
-No arch-hardcoded paths in the build.
+No arch-hardcoded paths in the build. Future modules may add their own deps.
 
 ## Layout
 
 ```
 include/media_core.h             Protocol-agnostic module API + PTZ caps
-include/ghost_ndihx.h            NDI|HX native API (libghost_ndihx)
+include/ghost_ndihx.h            NDI|HX native API (first decoder plugin)
 src/core/media_core.c            Module registry (no protocol SDKs)
 src/modules/ghost_ndihx/         NDI|HX implementation + PTZ probe
-src/modules/{ndi_full,st2110,rtsp}/  Placeholders for later protocols
-src/viewer_main.c                GhostVidStream SDL app (overlays / HUD)
+src/modules/{ndi_full,st2110,rtsp}/  Planned protocol modules (placeholders)
+src/viewer_main.c                GhostVidStream SDL shell (overlays / HUD)
 assets/ghostvidstream.png        Desktop icon (512px)
 packaging/ghostvidstream.desktop
-docs/integration.md              Native embed guide
-docs/modular-compatibility.md    Pluggable main-app contract
+docs/integration.md              NDI|HX embed guide
+docs/modular-compatibility.md    Pluggable shell contract
 config.example.conf              Sample settings
 install-deps.sh                  System deps (aarch64 + x86_64)
 Makefile
 ```
 
-## Local only
+## Remotes
 
-This project is local-only on Brendan’s machines. Do not push to GitHub.
+- GitHub (public): https://github.com/iHadAThought/GhostVidStream
+- Forgejo (private): https://git.ghostnetwork.app/Brendan/GhostVidStream
+- Decoder library: https://github.com/iHadAThought/libghost_ndihx
+- BookStack: https://bookstack.ghostnetwork.app/books/ghostvidstream
