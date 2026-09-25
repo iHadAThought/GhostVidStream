@@ -19,13 +19,16 @@
 tmp/
 *.partial
 
+# Alpine Pi appliance image artifacts (large)
+packaging/alpine-pi/out/
+
 # Stress harness binaries
 /stress_ndi_hx
 /stress_ndi_hx-asan
 
 stress_url_rx
-ghostvidstream
-ndi-hx-viewer
+/ghostvidstream
+/ndi-hx-viewer
 *.a
 *.o
 

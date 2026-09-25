@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launch GhostVidStream for HDMI kiosk (KMSDRM). Used by OpenRC.
+# shellcheck disable=SC1091
+[ -f /etc/conf.d/ghostvidstream ] && . /etc/conf.d/ghostvidstream
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_KMSDRM_DEVICE_INDEX="${SDL_KMSDRM_DEVICE_INDEX:-0}"
+exec /usr/local/bin/ghostvidstream --config /etc/ghostvidstream/config "$@"

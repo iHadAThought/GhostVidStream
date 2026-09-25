@@ -56,8 +56,21 @@ Prefer a wired media/General NIC. VMs without a GPU decode in software (higher C
 | `--fps-cap` / `fps_cap` | Cap present rate (CPU) |
 | `--hz` / `hz` | Best-effort display refresh hint |
 | `--stats` | Start with on-screen stats HUD (also toggle with `i`) |
+| `--auto-hide` / `auto_hide` | Kiosk: hide chrome + cursor after idle (`auto_hide_ms`, default 4000) |
+| `--protocol` / `protocol` | `ghost_ndihx` · `srt` · `rtmp` · `rtsp` |
+| `--url` / `url` | Full URL for SRT/RTMP/RTSP receive |
 
-### On-screen UI (SDL only)
+### Alpine Pi appliance (decode-only HDMI)
+
+Flashable Alpine **aarch64** image for Pi **3B+ / 4 / 5**: HDMI kiosk + LAN UI `:8080`.
+
+See **[docs/alpine-pi-appliance.md](docs/alpine-pi-appliance.md)** and
+**[packaging/alpine-pi/README.md](packaging/alpine-pi/README.md)**.
+
+```bash
+# On Linux aarch64 (e.g. booth 172.16.1.144):
+sudo ./packaging/alpine-pi/build-image.sh
+```
 
 | Key | Action |
 | --- | --- |

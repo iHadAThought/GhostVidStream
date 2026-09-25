@@ -1,0 +1,18 @@
+# GhostVidStream appliance receive config (decode → HDMI only)
+# Edited by ghostvidstream-web (:8080) or by hand; service restarts to apply.
+
+protocol=ghost_ndihx
+# url=srt://172.16.1.189:1600
+ip=172.16.1.189
+auto_search=true
+prefer_hx=true
+# Pi model profile script may rewrite bandwidth (3B+=lowest, 4/5=highest)
+bandwidth=highest
+fullscreen=true
+stats=false
+auto_hide=true
+auto_hide_ms=4000
+capture_wait_ms=8
+find_ms=4000
+rescan_ms=3000
+noframe_ms=8000

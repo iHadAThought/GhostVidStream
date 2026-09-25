@@ -1,0 +1,4 @@
+# ghostvidstream-web OpenRC conf
+GVS_WEB_BIND=0.0.0.0
+GVS_WEB_PORT=8080
+GVS_CONFIG=/etc/ghostvidstream/config

@@ -40,6 +40,8 @@ typedef struct {
   bool list_only;
   bool fullscreen;
   bool stats; /* HUD on at start when --stats */
+  bool auto_hide; /* hide chrome + cursor after idle (kiosk) */
+  int auto_hide_ms; /* idle ms before hide; default 4000 */
   int max_w;
   int max_h;
   int fps_cap;
@@ -194,6 +196,8 @@ typedef struct {
 typedef struct {
   bool controls_open;
   bool hud_on;
+  bool chrome_visible; /* false when auto-hide idle */
+  Uint32 last_input_ticks;
   bool ptz_available;
   media_caps_t caps;
   HitTarget hits[MAX_HITS];
@@ -410,6 +414,7 @@ static void usage(const char *argv0) {
           "  --hz N              Display refresh hint (0=default)\n"
           "  --config PATH       Load key=value settings file\n"
           "  --fullscreen        Start fullscreen\n"
+          "  --auto-hide         Hide chrome/cursor after idle (kiosk)\n"
           "  --stats             Start with on-screen stats HUD\n"
           "  -h, --help\n"
           "\n"
@@ -446,16 +451,51 @@ static void trim_inplace(char *s) {
     s[--n] = '\0';
 }
 
+static bool parse_boolish(const char *val) {
+  return (!strcasecmp(val, "1") || !strcasecmp(val, "true") || !strcasecmp(val, "yes") ||
+          !strcasecmp(val, "on"));
+}
+
 static int apply_config_kv(ViewerOptions *vo, const char *key, const char *val) {
   if (!strcmp(key, "fullscreen")) {
-    vo->fullscreen =
-        (!strcasecmp(val, "1") || !strcasecmp(val, "true") || !strcasecmp(val, "yes") ||
-         !strcasecmp(val, "on"));
+    vo->fullscreen = parse_boolish(val);
     return 0;
   }
   if (!strcmp(key, "stats")) {
-    vo->stats = (!strcasecmp(val, "1") || !strcasecmp(val, "true") || !strcasecmp(val, "yes") ||
-                 !strcasecmp(val, "on"));
+    vo->stats = parse_boolish(val);
+    return 0;
+  }
+  if (!strcmp(key, "auto_hide") || !strcmp(key, "autohide")) {
+    vo->auto_hide = parse_boolish(val);
+    return 0;
+  }
+  if (!strcmp(key, "auto_hide_ms") || !strcmp(key, "autohide_ms")) {
+    vo->auto_hide_ms = atoi(val);
+    if (vo->auto_hide_ms < 500)
+      vo->auto_hide_ms = 500;
+    return 0;
+  }
+  if (!strcmp(key, "protocol")) {
+    if (!strcasecmp(val, "ghost_ndihx") || !strcasecmp(val, "ndi_hx") || !strcasecmp(val, "ndi") ||
+        !strcasecmp(val, "ndihx"))
+      vo->protocol = VIEWER_PROTO_NDI_HX;
+    else if (!strcasecmp(val, "srt"))
+      vo->protocol = VIEWER_PROTO_SRT;
+    else if (!strcasecmp(val, "rtmp"))
+      vo->protocol = VIEWER_PROTO_RTMP;
+    else if (!strcasecmp(val, "rtsp"))
+      vo->protocol = VIEWER_PROTO_RTSP;
+    else {
+      fprintf(stderr, "config protocol: use ghost_ndihx|srt|rtmp|rtsp\n");
+      return -1;
+    }
+    return 0;
+  }
+  if (!strcmp(key, "url")) {
+    snprintf(vo->srt.url, sizeof(vo->srt.url), "%s", val);
+    snprintf(vo->rtmp.url, sizeof(vo->rtmp.url), "%s", val);
+    snprintf(vo->rtsp.url, sizeof(vo->rtsp.url), "%s", val);
+    snprintf(vo->lib.source_substr, sizeof(vo->lib.source_substr), "%s", val);
     return 0;
   }
   if (!strcmp(key, "max_w") || !strcmp(key, "max_width")) {
@@ -551,6 +591,8 @@ static void viewer_defaults(ViewerOptions *vo) {
   ghost_rtsp_options_defaults(&vo->rtsp);
   vo->protocol = VIEWER_PROTO_NDI_HX;
   vo->noframe_ms = 8000;
+  vo->auto_hide = false;
+  vo->auto_hide_ms = 4000;
 }
 
 static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
@@ -569,6 +611,8 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
       vo->list_only = true;
     } else if (!strcmp(argv[i], "--fullscreen")) {
       vo->fullscreen = true;
+    } else if (!strcmp(argv[i], "--auto-hide")) {
+      vo->auto_hide = true;
     } else if (!strcmp(argv[i], "--stats")) {
       vo->stats = true;
     } else if (!strcmp(argv[i], "--auto")) {
@@ -1160,11 +1204,17 @@ int main(int argc, char **argv) {
   UiState ui;
   memset(&ui, 0, sizeof(ui));
   ui.hud_on = vo.stats;
+  ui.chrome_visible = true;
+  ui.last_input_ticks = SDL_GetTicks();
   ui.held_ptz = HIT_NONE;
   refresh_ptz_caps(&ui, session);
 
+  if (vo.auto_hide)
+    SDL_ShowCursor(SDL_DISABLE);
+
   printf("Keys: q/Esc quit · f fullscreen · Space pause · r rescan · c controls · i stats · "
-         "[/] bandwidth · -/= fps-cap · 0 uncapped\n");
+         "[/] bandwidth · -/= fps-cap · 0 uncapped%s\n",
+         vo.auto_hide ? " · auto-hide chrome" : "");
   fflush(stdout);
 
   while (running) {
@@ -1172,7 +1222,15 @@ int main(int argc, char **argv) {
     while (SDL_PollEvent(&ev)) {
       if (ev.type == SDL_QUIT)
         running = false;
-      else if (ev.type == SDL_KEYDOWN) {
+      else if (ev.type == SDL_KEYDOWN || ev.type == SDL_MOUSEMOTION ||
+               ev.type == SDL_MOUSEBUTTONDOWN || ev.type == SDL_MOUSEBUTTONUP) {
+        ui.last_input_ticks = SDL_GetTicks();
+        if (vo.auto_hide) {
+          ui.chrome_visible = true;
+          SDL_ShowCursor(SDL_ENABLE);
+        }
+      }
+      if (ev.type == SDL_KEYDOWN) {
         SDL_Keycode k = ev.key.keysym.sym;
         if (k == SDLK_ESCAPE || k == SDLK_q)
           running = false;
@@ -1213,6 +1271,15 @@ int main(int argc, char **argv) {
           apply_ptz_hold(session, ui.held_ptz, false);
           ui.held_ptz = HIT_NONE;
         }
+      }
+    }
+
+    if (vo.auto_hide && ui.chrome_visible) {
+      Uint32 idle_ms = (Uint32)(vo.auto_hide_ms > 0 ? vo.auto_hide_ms : 4000);
+      if ((SDL_GetTicks() - ui.last_input_ticks) >= idle_ms) {
+        ui.chrome_visible = false;
+        ui.controls_open = false;
+        SDL_ShowCursor(SDL_DISABLE);
       }
     }
 
@@ -1347,12 +1414,15 @@ int main(int argc, char **argv) {
 
       ui_clear_hits(&ui);
       double src_fps = src_d > 0 ? (double)src_n / (double)src_d : 0.0;
-      if (ui.hud_on)
+      bool show_chrome = !vo.auto_hide || ui.chrome_visible;
+      if (show_chrome && ui.hud_on)
         draw_hud(ren, &vo, &connected, tex_w, tex_h, fps_display, src_fps, paused);
-      if (ui.controls_open)
-        layout_controls(ren, &ui, &vo, &connected, src_fps);
-      else
-        draw_controls_chip(ren, &ui);
+      if (show_chrome) {
+        if (ui.controls_open)
+          layout_controls(ren, &ui, &vo, &connected, src_fps);
+        else
+          draw_controls_chip(ren, &ui);
+      }
 
       SDL_RenderPresent(ren);
       last_present = SDL_GetTicks();

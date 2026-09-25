@@ -1,0 +1,44 @@
+#!/bin/sh
+# First-boot / boot-local: ensure appliance user, groups, services.
+# Decode-only GhostVidStream HDMI kiosk + LAN web UI.
+
+CFG=/etc/ghostvidstream/config
+MARKER=/var/lib/ghostvidstream/firstboot-done
+
+mkdir -p /var/lib/ghostvidstream /etc/ghostvidstream
+
+# Appliance user (no password login; HDMI kiosk + web)
+if ! id gvs >/dev/null 2>&1; then
+	addgroup -S gvs 2>/dev/null || true
+	adduser -S -D -H -h /var/lib/ghostvidstream -s /sbin/nologin -G gvs gvs 2>/dev/null || true
+fi
+addgroup gvs video 2>/dev/null || true
+addgroup gvs input 2>/dev/null || true
+addgroup gvs audio 2>/dev/null || true
+
+chown -R gvs:gvs /etc/ghostvidstream /var/lib/ghostvidstream 2>/dev/null || true
+chmod 0644 "$CFG" 2>/dev/null || true
+chmod 0755 /usr/local/bin/ghostvidstream-web /usr/local/bin/gvs-apply-profile 2>/dev/null || true
+
+# OpenRC: enable decode path services; keep SSH off unless operator enables it
+rc-update add dbus default 2>/dev/null || true
+rc-update add chronyd default 2>/dev/null || true
+rc-update add dhcpcd default 2>/dev/null || true
+rc-update add avahi-daemon default 2>/dev/null || true
+rc-update add ghostvidstream default 2>/dev/null || true
+rc-update add ghostvidstream-web default 2>/dev/null || true
+# SSH disabled by default (hardening)
+rc-update del sshd default 2>/dev/null || true
+rc-update del sshd boot 2>/dev/null || true
+
+# Quiet getty on tty1 so KMSDRM can own the seat (keep other ttys for recovery)
+if [ -f /etc/inittab ]; then
+	sed -i -E 's|^tty1::.*|# & (GhostVidStream kiosk owns DRM)|' /etc/inittab 2>/dev/null || true
+fi
+
+if [ ! -f "$MARKER" ]; then
+	/usr/local/bin/gvs-apply-profile 2>/dev/null || true
+	date -u +%Y-%m-%dT%H:%M:%SZ >"$MARKER"
+fi
+
+exit 0

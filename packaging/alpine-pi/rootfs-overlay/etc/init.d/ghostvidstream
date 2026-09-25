@@ -1,0 +1,31 @@
+#!/sbin/openrc-run
+# GhostVidStream HDMI kiosk (decode-only → SDL2 KMSDRM)
+
+description="GhostVidStream HDMI receive kiosk"
+command="/usr/local/bin/ghostvidstream-kiosk"
+command_args=""
+command_user="gvs:video"
+pidfile="/run/${RC_SVCNAME}.pid"
+command_background="yes"
+supervisor="supervise-daemon"
+respawn_delay=2
+respawn_max=0
+
+depend() {
+	need localmount
+	use dbus avahi-daemon dhcpcd chronyd
+	after udev dbus
+}
+
+start_pre() {
+	if [ -x /usr/local/bin/gvs-apply-profile ]; then
+		/usr/local/bin/gvs-apply-profile || true
+	fi
+	checkpath -d -o gvs:video -m 0755 /run/ghostvidstream
+	# shellcheck disable=SC1091
+	[ -f /etc/conf.d/ghostvidstream ] && . /etc/conf.d/ghostvidstream
+	export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+	export SDL_KMSDRM_DEVICE_INDEX="${SDL_KMSDRM_DEVICE_INDEX:-0}"
+	[ -w /sys/class/graphics/fbcon/cursor_blink ] && echo 0 >/sys/class/graphics/fbcon/cursor_blink || true
+	return 0
+}

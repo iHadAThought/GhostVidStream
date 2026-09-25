@@ -1,0 +1,9 @@
+GhostVidStream Alpine Pi appliance (decode-only → HDMI)
+
+- HDMI kiosk: ghostvidstream (SDL2 KMSDRM), auto-hide chrome
+- LAN settings: http://<this-host>:8080/
+- SSH: disabled by default (key-only policy if you enable sshd)
+- No encoders / publishers / full desktop
+
+Config: /etc/ghostvidstream/config
+Profiles: /etc/ghostvidstream/profiles/ (Pi 3B+ → bandwidth=lowest)

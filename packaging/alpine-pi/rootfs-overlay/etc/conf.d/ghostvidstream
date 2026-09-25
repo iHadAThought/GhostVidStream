@@ -1,0 +1,5 @@
+# Environment for GhostVidStream OpenRC service
+SDL_VIDEODRIVER=kmsdrm
+SDL_KMSDRM_DEVICE_INDEX=0
+# Uncomment only if KMSDRM fails on a specific board:
+# SDL_VIDEODRIVER=x11

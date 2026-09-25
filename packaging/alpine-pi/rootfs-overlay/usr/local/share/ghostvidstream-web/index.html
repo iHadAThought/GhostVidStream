@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GhostVidStream — receive settings</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b0f14; --card:#151b24; --fg:#e8eef7; --muted:#8b9bb0; --acc:#5b9cff; --ok:#3ecf8e; --bad:#ff6b6b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:15px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+    main { max-width:560px; margin:2rem auto; padding:0 1rem; }
+    h1 { font-size:1.25rem; margin:0 0 .25rem; }
+    .sub { color:var(--muted); margin:0 0 1.25rem; }
+    .card { background:var(--card); border-radius:12px; padding:1rem 1.1rem; margin-bottom:1rem; }
+    label { display:block; font-size:.8rem; color:var(--muted); margin:.65rem 0 .2rem; }
+    input, select { width:100%; padding:.55rem .65rem; border-radius:8px; border:1px solid #2a3545; background:#0e141c; color:var(--fg); }
+    .row { display:flex; gap:.75rem; flex-wrap:wrap; }
+    .row > * { flex:1 1 140px; }
+    .checks label { display:flex; align-items:center; gap:.5rem; margin:.4rem 0; color:var(--fg); font-size:.95rem; }
+    .checks input { width:auto; }
+    button { margin-top:.9rem; margin-right:.5rem; padding:.55rem 1rem; border:0; border-radius:8px; background:var(--acc); color:#041018; font-weight:600; cursor:pointer; }
+    button.secondary { background:#2a3545; color:var(--fg); }
+    button.danger { background:#5a2430; color:#ffd5d5; }
+    #status { font-size:.9rem; color:var(--muted); }
+    #status.ok { color:var(--ok); }
+    #status.bad { color:var(--bad); }
+    .pill { display:inline-block; padding:.15rem .5rem; border-radius:999px; background:#1e2836; font-size:.75rem; color:var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>GhostVidStream</h1>
+  <p class="sub">Decode-only HDMI appliance · receive settings <span class="pill">:8080</span></p>
+  <div class="card">
+    <div id="status">Loading…</div>
+    <div class="row">
+      <div>
+        <label for="protocol">Protocol</label>
+        <select id="protocol">
+          <option value="ghost_ndihx">NDI|HX (ghost_ndihx)</option>
+          <option value="srt">SRT</option>
+          <option value="rtmp">RTMP</option>
+          <option value="rtsp">RTSP</option>
+        </select>
+      </div>
+      <div>
+        <label for="bandwidth">Bandwidth (NDI|HX)</label>
+        <select id="bandwidth">
+          <option value="highest">highest</option>
+          <option value="lowest">lowest (Pi 3B+ default)</option>
+        </select>
+      </div>
+    </div>
+    <label for="ip">IP / host substring</label>
+    <input id="ip" placeholder="172.16.1.189" autocomplete="off" />
+    <label for="url">URL (SRT / RTMP / RTSP)</label>
+    <input id="url" placeholder="srt://172.16.1.189:1600" autocomplete="off" />
+    <div class="checks">
+      <label><input type="checkbox" id="auto_search" /> Auto-search</label>
+      <label><input type="checkbox" id="fullscreen" /> Fullscreen</label>
+      <label><input type="checkbox" id="auto_hide" /> Auto-hide chrome</label>
+      <label><input type="checkbox" id="stats" /> Stats HUD</label>
+    </div>
+    <button id="apply" type="button">Apply &amp; restart viewer</button>
+    <button id="restart" class="secondary" type="button">Restart viewer</button>
+    <button id="reboot" class="danger" type="button">Reboot appliance</button>
+  </div>
+  <p class="sub">Trusted LAN only. Basic auth is off by default. No camera passwords are stored here.</p>
+</main>
+<script>
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
+  const j = await r.json().catch(() => ({ ok:false, error:'bad json' }));
+  if (!r.ok || j.ok === false) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+  return j;
+}
+function setStatus(msg, ok) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = ok === true ? 'ok' : ok === false ? 'bad' : '';
+}
+function fill(cfg) {
+  const g = (k, d) => (cfg[k] != null && cfg[k] !== '' ? cfg[k] : d);
+  document.getElementById('protocol').value = g('protocol', 'ghost_ndihx');
+  document.getElementById('bandwidth').value = g('bandwidth', 'highest');
+  document.getElementById('ip').value = g('ip', '');
+  document.getElementById('url').value = g('url', '');
+  const truthy = v => ['1','true','yes','on'].includes(String(v).toLowerCase());
+  document.getElementById('auto_search').checked = truthy(g('auto_search', 'true'));
+  document.getElementById('fullscreen').checked = truthy(g('fullscreen', 'true'));
+  document.getElementById('auto_hide').checked = truthy(g('auto_hide', 'true'));
+  document.getElementById('stats').checked = truthy(g('stats', 'false'));
+}
+async function refresh() {
+  try {
+    const j = await api('/api/status');
+    fill(j.config || {});
+    setStatus('Viewer ' + (j.viewer_running ? 'running' : 'stopped') + ' · decode-only', true);
+  } catch (e) {
+    setStatus(String(e.message || e), false);
+  }
+}
+document.getElementById('apply').onclick = async () => {
+  const body = {
+    protocol: document.getElementById('protocol').value,
+    bandwidth: document.getElementById('bandwidth').value,
+    ip: document.getElementById('ip').value.trim(),
+    url: document.getElementById('url').value.trim(),
+    auto_search: document.getElementById('auto_search').checked,
+    fullscreen: document.getElementById('fullscreen').checked,
+    auto_hide: document.getElementById('auto_hide').checked,
+    stats: document.getElementById('stats').checked,
+  };
+  try {
+    setStatus('Applying…');
+    const j = await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
+    fill(j.config || body);
+    setStatus(j.message || 'Applied', true);
+  } catch (e) {
+    setStatus(String(e.message || e), false);
+  }
+};
+document.getElementById('restart').onclick = async () => {
+  try {
+    const j = await api('/api/restart', { method: 'POST', body: '{}' });
+    setStatus(j.message || 'Restarted', true);
+  } catch (e) { setStatus(String(e.message || e), false); }
+};
+document.getElementById('reboot').onclick = async () => {
+  if (!confirm('Reboot this appliance now?')) return;
+  try {
+    const j = await api('/api/reboot', { method: 'POST', body: '{}' });
+    setStatus(j.message || 'Rebooting…', true);
+  } catch (e) { setStatus(String(e.message || e), false); }
+};
+refresh();
+</script>
+</body>
+</html>

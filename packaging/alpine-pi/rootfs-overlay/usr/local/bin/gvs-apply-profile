@@ -1,0 +1,71 @@
+#!/bin/sh
+# Merge Pi model profile into /etc/ghostvidstream/config (bandwidth defaults).
+# Safe to run on every service start; does not overwrite operator protocol/url/ip.
+
+set -eu
+CFG="${GVS_CONFIG:-/etc/ghostvidstream/config}"
+PROF_DIR="/etc/ghostvidstream/profiles"
+MARKER="/run/ghostvidstream/profile-applied"
+
+mkdir -p /run/ghostvidstream
+model=""
+if [ -r /proc/device-tree/model ]; then
+	model=$(tr -d '\0' </proc/device-tree/model)
+elif [ -r /sys/firmware/devicetree/base/model ]; then
+	model=$(tr -d '\0' </sys/firmware/devicetree/base/model)
+fi
+
+profile="default.conf"
+case "$model" in
+	*"3 Model B Plus"*|*"3 Model B+"*|*"Compute Module 3"*)
+		profile="pi3bp.conf"
+		;;
+	*"Raspberry Pi 4"*|*"Compute Module 4"*)
+		profile="pi4.conf"
+		;;
+	*"Raspberry Pi 5"*|*"Compute Module 5"*)
+		profile="pi5.conf"
+		;;
+esac
+
+src="${PROF_DIR}/${profile}"
+[ -f "$src" ] || src="${PROF_DIR}/default.conf"
+[ -f "$CFG" ] || touch "$CFG"
+
+# Only auto-apply bandwidth from profile when not yet stamped this boot,
+# or when config lacks a bandwidth key.
+need=0
+if [ ! -f "$MARKER" ]; then
+	need=1
+fi
+if ! grep -qE '^[[:space:]]*bandwidth=' "$CFG" 2>/dev/null; then
+	need=1
+fi
+
+if [ "$need" -eq 1 ]; then
+	bw=$(grep -E '^[[:space:]]*bandwidth=' "$src" | head -n1 | cut -d= -f2- | tr -d '[:space:]' || true)
+	if [ -n "$bw" ]; then
+		tmp=$(mktemp)
+		if grep -qE '^[[:space:]]*bandwidth=' "$CFG"; then
+			sed -E "s/^[[:space:]]*bandwidth=.*/bandwidth=${bw}/" "$CFG" >"$tmp"
+		else
+			cat "$CFG" >"$tmp"
+			printf 'bandwidth=%s\n' "$bw" >>"$tmp"
+		fi
+		# Optional max_w / max_h / fps_cap from profile if present and missing in cfg
+		for key in max_w max_h fps_cap; do
+			val=$(grep -E "^[[:space:]]*${key}=" "$src" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '[:space:]' || true)
+			[ -n "$val" ] || continue
+			if grep -qE "^[[:space:]]*${key}=" "$tmp"; then
+				sed -i -E "s/^[[:space:]]*${key}=.*/${key}=${val}/" "$tmp"
+			else
+				printf '%s=%s\n' "$key" "$val" >>"$tmp"
+			fi
+		done
+		cat "$tmp" >"$CFG"
+		rm -f "$tmp"
+	fi
+	printf '%s\n' "$profile" >"$MARKER"
+	printf 'gvs-apply-profile: model=%s profile=%s\n' "${model:-unknown}" "$profile" >&2
+fi
+exit 0

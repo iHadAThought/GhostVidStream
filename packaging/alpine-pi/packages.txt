@@ -1,0 +1,70 @@
+# Decode-only Alpine aarch64 package set for GhostVidStream HDMI appliance.
+# No encoders, publishers, or desktop environments.
+# Consumed by build-image.sh (apk add --no-cache $(grep -v '^#' …)).
+
+alpine-base
+openrc
+busybox-openrc
+busybox-mdev-openrc
+agetty
+util-linux
+e2fsprogs
+dosfstools
+parted
+sfdisk
+blkid
+linux-rpi
+raspberrypi-bootloader
+raspberrypi-bootloader-common
+raspberrypi
+linux-firmware-brcm
+wireless-regdb
+chrony
+dbus
+avahi
+avahi-tools
+dhcpcd
+openssh
+sudo
+ca-certificates
+tzdata
+musl
+gcompat
+libstdc++
+mesa-dri-gallium
+mesa-gbm
+libdrm
+libegl
+libgl
+sdl2
+ffmpeg-libs
+ffmpeg
+libsrt
+python3
+py3-pip
+eudev
+eudev-openrc
+kbd
+kbd-misc
+font-dejavu
+curl
+wget
+tar
+xz
+gzip
+coreutils
+findutils
+grep
+sed
+gawk
+bash
+shadow
+haveged
+libcap2
+alsa-lib
+# Build-time only (image host / chroot build stage — not required on final flash if binaries prebuilt)
+# build-base
+# pkgconf
+# sdl2-dev
+# ffmpeg-dev
+# libsrt-dev

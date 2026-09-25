@@ -1,0 +1,23 @@
+#!/sbin/openrc-run
+# Minimal LAN receive-settings UI (decode-only; no camera admin secrets)
+
+name="ghostvidstream-web"
+description="GhostVidStream settings UI on :8080"
+command="/usr/local/bin/ghostvidstream-web"
+command_args="--bind 0.0.0.0 --port 8080 --config /etc/ghostvidstream/config"
+command_user="gvs:gvs"
+pidfile="/run/${RC_SVCNAME}.pid"
+command_background="yes"
+supervisor="supervise-daemon"
+respawn_delay=2
+
+depend() {
+	need localmount
+	use dhcpcd
+	after ghostvidstream
+}
+
+start_pre() {
+	checkpath -d -o gvs:gvs -m 0755 /run/ghostvidstream
+	return 0
+}
