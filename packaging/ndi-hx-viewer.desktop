@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=GhostVidStream
+GenericName=GhostVidStream NDI|HX Viewer
+Comment=GhostVidStream — auto-discover and view NDI|HX sources on the LAN
+Exec=ghostvidstream --auto
+Icon=ghostvidstream
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=GhostVidStream;NDI;HX;video;camera;booth;
+StartupNotify=true
