@@ -17,6 +17,17 @@ LDFLAGS     += -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib
 UNAME_M := $(shell uname -m)
 UNAME_S := $(shell uname -s)
 
+# Linux: prefer distro libav (often built with --enable-libsrt) ahead of a
+# PREFIX=/usr/local FFmpeg that may lack the SRT protocol ("Protocol not found").
+ifeq ($(UNAME_S),Linux)
+  MULTIARCH_LIB := $(shell $(CC) -print-multiarch 2>/dev/null)
+  ifneq ($(MULTIARCH_LIB),)
+    ifneq ($(wildcard /usr/lib/$(MULTIARCH_LIB)/libavformat.so),)
+      LDFLAGS := -L/usr/lib/$(MULTIARCH_LIB) -Wl,-rpath,/usr/lib/$(MULTIARCH_LIB) $(LDFLAGS)
+    endif
+  endif
+endif
+
 SDL_CFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 2>/dev/null)
 SDL_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null)
 ifeq ($(SDL_LIBS),)

@@ -135,14 +135,17 @@ static void apply_low_latency(AVDictionary **opts, const ffmpeg_rx_options_t *o,
   char buf[32];
   bool is_rtmp = url && !strncmp(url, "rtmp", 4);
   bool is_rtsp = url && !strncmp(url, "rtsp", 4);
+  bool is_srt = url && !strncmp(url, "srt", 3);
 
-  if (o->rw_timeout_us > 0 && !is_rtmp) {
+  /* RTMP: skip socket timeout knobs (some builds map them to listen_timeout).
+   * SRT: skip generic "timeout" / rw_timeout — Ubuntu libav + libsrt treat them
+   * as listen/accept and fail caller open immediately; Mac Homebrew is tolerant. */
+  if (o->rw_timeout_us > 0 && !is_rtmp && !is_srt) {
     snprintf(buf, sizeof(buf), "%d", o->rw_timeout_us);
     av_dict_set(opts, "rw_timeout", buf, 0);
     av_dict_set(opts, "stimeout", buf, 0); /* RTSP */
   }
-  if (o->connect_timeout_ms > 0 && !is_rtmp) {
-    /* Avoid generic "timeout" on RTMP — some builds map it to listen_timeout. */
+  if (o->connect_timeout_ms > 0 && !is_rtmp && !is_srt) {
     snprintf(buf, sizeof(buf), "%d000", o->connect_timeout_ms);
     av_dict_set(opts, "timeout", buf, 0);
   }
@@ -160,6 +163,11 @@ static void apply_low_latency(AVDictionary **opts, const ffmpeg_rx_options_t *o,
     av_dict_set(opts, "rtmp_live", "live", 0);
   if (is_rtsp && o->rtsp_tcp)
     av_dict_set(opts, "rtsp_transport", "tcp", 0);
+  if (is_srt) {
+    /* Prefer caller mode when URL omitted query; AIDA listen is the peer. */
+    av_dict_set(opts, "mode", "caller", 0);
+    av_dict_set(opts, "transtype", "live", 0);
+  }
 }
 static int open_decoder(ffmpeg_rx_session_t *s) {
   const AVStream *st = s->fmt->streams[s->video_stream];
