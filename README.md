@@ -150,6 +150,11 @@ install-deps.sh                  System deps (aarch64 + x86_64)
 Makefile
 ```
 
+## License
+
+Released under the [MIT License](LICENSE) — free to use, modify, and redistribute.
+Copyright © 2026 Brendan Mahoney / iHadAThought.
+
 ## Remotes
 
 - GitHub (public): https://github.com/iHadAThought/GhostVidStream
