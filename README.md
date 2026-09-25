@@ -10,6 +10,7 @@ optional PTZ when the active module advertises it, and a common settings surface
 | **GhostVidStream** | Product / SDL reference viewer + desktop launcher |
 | `libmedia_core` | Protocol-agnostic module registry + PTZ capability contract |
 | `libghost_ndihx` (`ghost_ndihx.h`, `ghost_ndihx_*`) | **First** plug-in decoder — NDI\|HX only (no GUI) |
+| `libghost_discover` (`ghost_discover.h`) | Pluggable NDI LAN discovery (Bonjour + NDI SDK) |
 | Planned modules | FULL NDI · SMPTE 2110 · RTSP (placeholders under `src/modules/`) |
 | Desktop launcher | **GhostVidStream** → `ghostvidstream --auto` |
 | `install-deps.sh` | Today: libndi (SDK v6) + FFmpeg ≥ 7 + SDL2 (NDI\|HX module deps) |
@@ -49,6 +50,7 @@ Prefer a wired media/General NIC. VMs without a GPU decode in software (higher C
 | Flag / config key | Effect |
 | --- | --- |
 | `--auto` / `auto_search` | Keep scanning until a camera matches; reconnect on silence |
+| `--discover` / `discover` | `auto` (Bonjour→SDK) · `bonjour` · `ndi_sdk` |
 | `--ip` / `ip` | Prefer source whose name/url contains this host |
 | `--source` / `source` | Prefer name/url substring |
 | `--bandwidth` / `bandwidth` | `highest` or `lowest` (NDI\|HX module) |
