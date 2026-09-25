@@ -47,6 +47,7 @@ void ffmpeg_rx_options_defaults(ffmpeg_rx_options_t *opt) {
   opt->capture_wait_ms = 8;
   opt->low_latency = true;
   opt->rw_timeout_us = 5000000;
+  opt->rtsp_tcp = true;
 }
 
 const char *ffmpeg_rx_version(void) { return "0.1.0"; }
@@ -133,6 +134,7 @@ void ffmpeg_rx_session_destroy(ffmpeg_rx_session_t *s) {
 static void apply_low_latency(AVDictionary **opts, const ffmpeg_rx_options_t *o, const char *url) {
   char buf[32];
   bool is_rtmp = url && !strncmp(url, "rtmp", 4);
+  bool is_rtsp = url && !strncmp(url, "rtsp", 4);
 
   if (o->rw_timeout_us > 0 && !is_rtmp) {
     snprintf(buf, sizeof(buf), "%d", o->rw_timeout_us);
@@ -146,8 +148,9 @@ static void apply_low_latency(AVDictionary **opts, const ffmpeg_rx_options_t *o,
   }
   if (o->low_latency) {
     av_dict_set(opts, "fflags", "nobuffer", 0);
-    av_dict_set(opts, "analyzeduration", "0", 0);
-    av_dict_set(opts, "probesize", "32768", 0);
+    /* Mild probe — tiny probesize breaks live SRT/RTMP/RTSP; HEVC needs more. */
+    av_dict_set(opts, "analyzeduration", "2000000", 0);
+    av_dict_set(opts, "probesize", "1000000", 0);
     if (!is_rtmp) {
       av_dict_set(opts, "flags", "low_delay", 0);
       av_dict_set(opts, "max_delay", "0", 0);
@@ -155,6 +158,8 @@ static void apply_low_latency(AVDictionary **opts, const ffmpeg_rx_options_t *o,
   }
   if (is_rtmp)
     av_dict_set(opts, "rtmp_live", "live", 0);
+  if (is_rtsp && o->rtsp_tcp)
+    av_dict_set(opts, "rtsp_transport", "tcp", 0);
 }
 static int open_decoder(ffmpeg_rx_session_t *s) {
   const AVStream *st = s->fmt->streams[s->video_stream];

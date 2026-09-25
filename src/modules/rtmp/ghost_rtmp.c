@@ -163,7 +163,7 @@ int ghost_rtmp_discover(ghost_rtmp_session_t *session, ghost_rtmp_source_t *out,
     return -1;
   memset(&out[0], 0, sizeof(out[0]));
   build_url(&session->opt, out[0].url, sizeof(out[0].url));
-  snprintf(out[0].name, sizeof(out[0].name), "RTMP %s", out[0].url);
+  snprintf(out[0].name, sizeof(out[0].name), "RTMP %.240s", out[0].url);
   return 1;
 }
 
@@ -182,7 +182,7 @@ int ghost_rtmp_connect_auto(ghost_rtmp_session_t *session, volatile const int *c
   ghost_rtmp_source_t src;
   memset(&src, 0, sizeof(src));
   build_url(&session->opt, src.url, sizeof(src.url));
-  snprintf(src.name, sizeof(src.name), "RTMP %s", src.url);
+  snprintf(src.name, sizeof(src.name), "RTMP %.240s", src.url);
   for (;;) {
     if (cancel && *cancel)
       return -1;
@@ -270,7 +270,7 @@ static int mod_discover(media_session_t *session, media_source_t *out, int cap, 
   for (int i = 0; i < n; i++) {
     memset(&out[i], 0, sizeof(out[i]));
     snprintf(out[i].name, sizeof(out[i].name), "%s", tmp[i].name);
-    snprintf(out[i].url, sizeof(out[i].url), "%s", tmp[i].url);
+    snprintf(out[i].url, sizeof(out[i].url), "%.255s", tmp[i].url);
     snprintf(out[i].tag, sizeof(out[i].tag), "%s", "rtmp");
     out[i].protocol = MEDIA_PROTO_RTMP;
   }
@@ -302,7 +302,7 @@ static void mod_connected_source(const media_session_t *session, media_source_t 
   ghost_rtmp_connected_source((const ghost_rtmp_session_t *)session, &s);
   memset(out, 0, sizeof(*out));
   snprintf(out->name, sizeof(out->name), "%s", s.name);
-  snprintf(out->url, sizeof(out->url), "%s", s.url);
+  snprintf(out->url, sizeof(out->url), "%.255s", s.url);
   snprintf(out->tag, sizeof(out->tag), "%s", "rtmp");
   out->protocol = MEDIA_PROTO_RTMP;
 }

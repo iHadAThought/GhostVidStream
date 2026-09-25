@@ -1,10 +1,8 @@
 # Module: rtsp
 
-Placeholder for the **RTSP/RTP** GhostVidStream decoder plugin.
+GhostVidStream **RTSP/RTP** decoder plugin (`ghost_rtsp`).
 
-Implement `media_module_t` from `include/media_core.h` and call
-`media_register_module()` from the module's init path. Do not put protocol
-types into `media_core.h`.
+Implements `media_module_t` (`id=rtsp`, `MEDIA_PROTO_RTSP`) via shared `ffmpeg_rx`
+BGRX path. Native API: `include/ghost_rtsp.h`.
 
-See `docs/modular-compatibility.md`. GhostVidStream is the shell; this module
-is protocol-specific.
+Default AIDA path: `rtsp://IP:554/stream/main`.

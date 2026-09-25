@@ -1,10 +1,28 @@
 /**
  * @file ghost_srt.h
- * @brief GhostVidStream SRT receive module — native API + media_core plugin.
+ * @brief libghost_srt — SRT receive API (first-class GhostVidStream decoder plugin).
  *
- * URL-based low-latency SRT decoder (FFmpeg + libsrt). Same lifecycle shape as
- * libghost_ndihx: options → session → connect_auto → capture_newest (BGRX).
- * No PTZ over SRT.
+ * UI-free SRT library for Linux aarch64 + x86_64 (+ macOS for lab). GhostVidStream
+ * is the multi-protocol shell; this header is the **SRT** module. On AIDA cameras,
+ * SRT sits beside RTSP in the UI — treat it as a sibling first-class path to NDI|HX.
+ *
+ * Hosts may:
+ *   A) Call `ghost_srt_*` directly (this header), or
+ *   B) Use protocol-agnostic `media_core.h` after `ghost_srt_register_media_module()`.
+ *
+ * Typical native embed flow:
+ *   1. ghost_srt_init()
+ *   2. ghost_srt_options_defaults(&opt);  set url or ip/port/stream_id
+ *   3. session = ghost_srt_session_create(&opt)
+ *   4. ghost_srt_connect_auto(session)
+ *   5. loop: ghost_srt_capture_newest(session, &frame)  // BGRX newest-frame
+ *   6. ghost_srt_session_destroy(session); ghost_srt_shutdown()
+ *
+ * Threading: one session is not thread-safe. Use one session per thread, or
+ * external locking around capture/connect/disconnect.
+ *
+ * Dependencies: FFmpeg with libsrt (--enable-libsrt), libsrt runtime.
+ * No PTZ over SRT. See docs/embed-srt.md / docs/srt-rtmp-rtsp-encode-compatibility.md.
  */
 #ifndef GHOST_SRT_H
 #define GHOST_SRT_H

@@ -25,6 +25,7 @@ typedef struct ffmpeg_rx_options {
   int capture_wait_ms;    /**< Wait inside capture before returning false. Default 8. */
   bool low_latency;       /**< nobuffer / low_delay / tiny probe. Default true. */
   int rw_timeout_us;      /**< Network read/write timeout (µs). Default 5_000_000. */
+  bool rtsp_tcp;          /**< Prefer RTSP interleaved TCP. Default true when URL is rtsp. */
 } ffmpeg_rx_options_t;
 
 typedef struct ffmpeg_rx_frame {

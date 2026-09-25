@@ -28,3 +28,10 @@ ghostvidstream
 ndi-hx-viewer
 *.a
 *.o
+
+# Stress / ASan build products
+stress_url_rx
+stress_url_rx-asan
+stress_ndi_hx
+stress_ndi_hx-asan
+*.dSYM/

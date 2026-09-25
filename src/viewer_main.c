@@ -2,13 +2,14 @@
  * @file viewer_main.c
  * @brief GhostVidStream — multi-protocol SDL2 receive / viewer shell.
  *
- * First wired decoder plugin: libghost_ndihx (NDI|HX). FULL NDI / 2110 / RTSP
- * modules are planned behind media_core. Light overlays (controls + stats HUD +
+ * Wired decoder plugins: libghost_ndihx (NDI|HX), srt, rtmp, rtsp. FULL NDI /
+ * 2110 modules remain planned. Light overlays (controls + stats HUD +
  * capability-gated PTZ) — no GTK/Qt. Embeds that only need one protocol should
  * link that module directly (see docs/integration.md / modular-compatibility.md).
  */
 #include "ghost_ndihx.h"
 #include "ghost_rtmp.h"
+#include "ghost_rtsp.h"
 #include "ghost_srt.h"
 #include "media_core.h"
 
@@ -21,18 +22,20 @@
 #include <unistd.h>
 
 #define PRODUCT_NAME "GhostVidStream"
-#define VIEWER_VERSION "0.5.0"
+#define VIEWER_VERSION "0.6.0"
 
 typedef enum {
   VIEWER_PROTO_NDI_HX = 0,
   VIEWER_PROTO_SRT = 1,
-  VIEWER_PROTO_RTMP = 2
+  VIEWER_PROTO_RTMP = 2,
+  VIEWER_PROTO_RTSP = 3
 } ViewerProtocol;
 
 typedef struct {
   ghost_ndihx_options_t lib;
   ghost_srt_options_t srt;
   ghost_rtmp_options_t rtmp;
+  ghost_rtsp_options_t rtsp;
   ViewerProtocol protocol;
   bool list_only;
   bool fullscreen;
@@ -383,12 +386,12 @@ static void layout_controls(SDL_Renderer *ren, UiState *ui, ViewerOptions *vo,
 static void usage(const char *argv0) {
   fprintf(stderr,
           "%s — multi-protocol video receive shell\n"
-          "Decoders: libghost_ndihx (NDI|HX), srt, rtmp. Planned: FULL NDI, 2110, RTSP.\n"
+          "Decoders: libghost_ndihx (NDI|HX), srt, rtmp, rtsp. Planned: FULL NDI, 2110.\n"
           "Usage: %s [options]\n"
           "\n"
           "Protocol\n"
-          "  --protocol MODE     ghost_ndihx|ndi_hx|srt|rtmp  (default: ghost_ndihx)\n"
-          "  --url URL           Full srt:// or rtmp:// (or http://…flv) URL\n"
+          "  --protocol MODE     ghost_ndihx|ndi_hx|srt|rtmp|rtsp  (default: ghost_ndihx)\n"
+          "  --url URL           Full srt:// / rtmp:// / rtsp:// (or http://…flv) URL\n"
           "\n"
           "Discovery / connect\n"
           "  --list              List sources and exit\n"
@@ -545,6 +548,7 @@ static void viewer_defaults(ViewerOptions *vo) {
   ghost_ndihx_options_defaults(&vo->lib);
   ghost_srt_options_defaults(&vo->srt);
   ghost_rtmp_options_defaults(&vo->rtmp);
+  ghost_rtsp_options_defaults(&vo->rtsp);
   vo->protocol = VIEWER_PROTO_NDI_HX;
   vo->noframe_ms = 8000;
 }
@@ -571,10 +575,12 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
       vo->lib.auto_search = true;
       vo->srt.auto_search = true;
       vo->rtmp.auto_search = true;
+      vo->rtsp.auto_search = true;
     } else if (!strcmp(argv[i], "--no-auto")) {
       vo->lib.auto_search = false;
       vo->srt.auto_search = false;
       vo->rtmp.auto_search = false;
+      vo->rtsp.auto_search = false;
     } else if (!strcmp(argv[i], "--any")) {
       vo->lib.prefer_hx = false;
     } else if (!strcmp(argv[i], "--source") && i + 1 < argc) {
@@ -583,6 +589,7 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
       snprintf(vo->lib.ip_substr, sizeof(vo->lib.ip_substr), "%s", argv[++i]);
       snprintf(vo->srt.ip_substr, sizeof(vo->srt.ip_substr), "%s", vo->lib.ip_substr);
       snprintf(vo->rtmp.ip_substr, sizeof(vo->rtmp.ip_substr), "%s", vo->lib.ip_substr);
+      snprintf(vo->rtsp.ip_substr, sizeof(vo->rtsp.ip_substr), "%s", vo->lib.ip_substr);
     } else if (!strcmp(argv[i], "--protocol") && i + 1 < argc) {
       const char *p = argv[++i];
       if (!strcasecmp(p, "ghost_ndihx") || !strcasecmp(p, "ndi_hx") || !strcasecmp(p, "ndi-hx") ||
@@ -592,14 +599,17 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
         vo->protocol = VIEWER_PROTO_SRT;
       else if (!strcasecmp(p, "rtmp"))
         vo->protocol = VIEWER_PROTO_RTMP;
+      else if (!strcasecmp(p, "rtsp"))
+        vo->protocol = VIEWER_PROTO_RTSP;
       else {
-        fprintf(stderr, "Invalid --protocol (use ghost_ndihx|srt|rtmp)\n");
+        fprintf(stderr, "Invalid --protocol (use ghost_ndihx|srt|rtmp|rtsp)\n");
         return false;
       }
     } else if (!strcmp(argv[i], "--url") && i + 1 < argc) {
       const char *u = argv[++i];
       snprintf(vo->srt.url, sizeof(vo->srt.url), "%s", u);
       snprintf(vo->rtmp.url, sizeof(vo->rtmp.url), "%s", u);
+      snprintf(vo->rtsp.url, sizeof(vo->rtsp.url), "%s", u);
       snprintf(vo->lib.source_substr, sizeof(vo->lib.source_substr), "%s", u);
     } else if (!strcmp(argv[i], "--find-ms") && i + 1 < argc) {
       vo->lib.find_ms = atoi(argv[++i]);
@@ -827,7 +837,9 @@ static bool handle_hit(HitId id, ViewerOptions *vo, UiState *ui, ghost_ndihx_ses
 }
 
 static int run_url_protocol_viewer(ViewerOptions *vo) {
-  const char *mod_id = vo->protocol == VIEWER_PROTO_SRT ? "srt" : "rtmp";
+  const char *mod_id = vo->protocol == VIEWER_PROTO_SRT
+                           ? "srt"
+                           : vo->protocol == VIEWER_PROTO_RTMP ? "rtmp" : "rtsp";
   const media_module_t *mod = media_find_module(mod_id);
   if (!mod) {
     fprintf(stderr, "module %s not registered\n", mod_id);
@@ -837,17 +849,24 @@ static int run_url_protocol_viewer(ViewerOptions *vo) {
 
   media_open_params_t op;
   media_open_params_defaults(&op);
-  op.auto_search = vo->protocol == VIEWER_PROTO_SRT ? vo->srt.auto_search : vo->rtmp.auto_search;
   if (vo->protocol == VIEWER_PROTO_SRT) {
     if (vo->lib.ip_substr[0] && !vo->srt.ip_substr[0])
       snprintf(vo->srt.ip_substr, sizeof(vo->srt.ip_substr), "%s", vo->lib.ip_substr);
+    op.auto_search = vo->srt.auto_search;
     op.protocol_opts = &vo->srt;
     snprintf(op.ip_substr, sizeof(op.ip_substr), "%s", vo->srt.ip_substr);
-  } else {
+  } else if (vo->protocol == VIEWER_PROTO_RTMP) {
     if (vo->lib.ip_substr[0] && !vo->rtmp.ip_substr[0])
       snprintf(vo->rtmp.ip_substr, sizeof(vo->rtmp.ip_substr), "%s", vo->lib.ip_substr);
+    op.auto_search = vo->rtmp.auto_search;
     op.protocol_opts = &vo->rtmp;
     snprintf(op.ip_substr, sizeof(op.ip_substr), "%s", vo->rtmp.ip_substr);
+  } else {
+    if (vo->lib.ip_substr[0] && !vo->rtsp.ip_substr[0])
+      snprintf(vo->rtsp.ip_substr, sizeof(vo->rtsp.ip_substr), "%s", vo->lib.ip_substr);
+    op.auto_search = vo->rtsp.auto_search;
+    op.protocol_opts = &vo->rtsp;
+    snprintf(op.ip_substr, sizeof(op.ip_substr), "%s", vo->rtsp.ip_substr);
   }
 
   fprintf(stderr, "%s %s — multi-protocol shell (active decoder: %s, media_core %s)\n", PRODUCT_NAME,
@@ -954,8 +973,10 @@ static int run_url_protocol_viewer(ViewerOptions *vo) {
       /* Drain while paused when module supports it via native API */
       if (vo->protocol == VIEWER_PROTO_SRT)
         ghost_srt_drain((ghost_srt_session_t *)session);
-      else
+      else if (vo->protocol == VIEWER_PROTO_RTMP)
         ghost_rtmp_drain((ghost_rtmp_session_t *)session);
+      else
+        ghost_rtsp_drain((ghost_rtsp_session_t *)session);
     }
 
     if (got && fr.data && fr.width > 0 && fr.height > 0) {
@@ -1027,8 +1048,10 @@ int main(int argc, char **argv) {
   ghost_ndihx_register_media_module();
   ghost_srt_register_media_module();
   ghost_rtmp_register_media_module();
+  ghost_rtsp_register_media_module();
 
-  if (vo.protocol == VIEWER_PROTO_SRT || vo.protocol == VIEWER_PROTO_RTMP)
+  if (vo.protocol == VIEWER_PROTO_SRT || vo.protocol == VIEWER_PROTO_RTMP ||
+      vo.protocol == VIEWER_PROTO_RTSP)
     return run_url_protocol_viewer(&vo);
 
   /* Peer-visible receiver name on the LAN */

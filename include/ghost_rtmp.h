@@ -1,9 +1,17 @@
 /**
  * @file ghost_rtmp.h
- * @brief GhostVidStream RTMP receive module — native API + media_core plugin.
+ * @brief libghost_rtmp — RTMP / HTTP-FLV receive API (first-class GhostVidStream plugin).
  *
- * Pulls live RTMP (or HTTP-FLV) via FFmpeg. Same lifecycle as libghost_ndihx.
- * No PTZ over RTMP. Default AIDA URL: rtmp://IP:1935/app/rtmpstream0
+ * UI-free RTMP pull library. Same lifecycle bar as libghost_ndihx / libghost_srt.
+ * Hosts may call `ghost_rtmp_*` directly or register with `media_core`.
+ *
+ * Typical embed flow mirrors ghost_srt (init → options → session → connect_auto →
+ * capture_newest BGRX → destroy). Default AIDA pull URL:
+ *   rtmp://IP:1935/app/rtmpstream0
+ * Optional HTTP-FLV: prefer_flv → http://IP:8080/app/rtmpstream0.flv
+ *
+ * Threading: one session is not thread-safe.
+ * Dependencies: FFmpeg (RTMP demux). No PTZ. See docs/embed-rtmp.md.
  */
 #ifndef GHOST_RTMP_H
 #define GHOST_RTMP_H

@@ -1,7 +1,7 @@
 # GhostVidStream — portable aarch64 + x86_64
 #
 # Product / UI: GhostVidStream (SDL viewer + desktop launcher)
-# Modules:      libghost_ndihx (NDI|HX), libghost_srt, libghost_rtmp (+ ffmpeg_rx)
+# Modules:      libghost_ndihx (NDI|HX), libghost_srt, libghost_rtmp, libghost_rtsp (+ ffmpeg_rx)
 # Protocol core: libmedia_core
 
 PREFIX      ?= /usr/local
@@ -59,9 +59,9 @@ URL_LIBS := $(FFMPEG_LIBS) $(SRT_LIBS) -lpthread -lm
 DESKTOP_DIR := $(DESTDIR)$(PREFIX)/share/applications
 ICON_DIR    := $(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps
 
-.PHONY: all clean install install-lib install-viewer install-desktop info stress stress-asan stress-url
+.PHONY: all clean install install-lib install-viewer install-desktop info stress stress-asan stress-url stress-url-asan
 
-all: info libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a ghostvidstream
+all: info libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a ghostvidstream
 
 info:
 	@echo "Building GhostVidStream for arch=$(UNAME_M) PREFIX=$(PREFIX)"
@@ -90,11 +90,16 @@ libghost_rtmp.a: src/modules/rtmp/ghost_rtmp.c include/ghost_rtmp.h include/ffmp
 	$(CC) $(CFLAGS) -c -o ghost_rtmp.o src/modules/rtmp/ghost_rtmp.c
 	$(AR) rcs $@ ghost_rtmp.o
 	rm -f ghost_rtmp.o
+libghost_rtsp.a: src/modules/rtsp/ghost_rtsp.c include/ghost_rtsp.h include/ffmpeg_rx.h include/media_core.h libghost_ffmpeg_rx.a libmedia_core.a
+	$(CC) $(CFLAGS) -c -o ghost_rtsp.o src/modules/rtsp/ghost_rtsp.c
+	$(AR) rcs $@ ghost_rtsp.o
+	rm -f ghost_rtsp.o
 
-ghostvidstream: src/viewer_main.c libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
-		include/ghost_ndihx.h include/ghost_srt.h include/ghost_rtmp.h include/media_core.h
+
+ghostvidstream: src/viewer_main.c libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		include/ghost_ndihx.h include/ghost_srt.h include/ghost_rtmp.h include/ghost_rtsp.h include/media_core.h
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(FFMPEG_CFLAGS) -o $@ src/viewer_main.c \
-		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
 		$(LDFLAGS) $(NDI_LIBS) $(URL_LIBS) $(SDL_LIBS)
 	ln -sfn ghostvidstream ndi-hx-viewer
 
@@ -109,9 +114,18 @@ stress_ghost_ndihx: tests/stress/stress_ghost_ndihx.c libghost_ndihx.a libmedia_
 
 stress-url: stress_url_rx
 
-stress_url_rx: tests/stress/stress_url_rx.c libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a
+stress_url_rx: tests/stress/stress_url_rx.c libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a
 	$(CC) $(CFLAGS) $(FFMPEG_CFLAGS) -o $@ tests/stress/stress_url_rx.c \
-		libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		$(LDFLAGS) $(URL_LIBS)
+
+stress-url-asan: stress_url_rx-asan
+
+stress_url_rx-asan: tests/stress/stress_url_rx.c src/modules/srt/ghost_srt.c src/modules/rtmp/ghost_rtmp.c \
+		src/modules/rtsp/ghost_rtsp.c src/modules/ffmpeg_rx/ffmpeg_rx.c src/core/media_core.c
+	$(CC) $(CFLAGS) $(FFMPEG_CFLAGS) -O1 -g -fsanitize=address -fno-omit-frame-pointer \
+		-o $@ tests/stress/stress_url_rx.c src/modules/srt/ghost_srt.c src/modules/rtmp/ghost_rtmp.c \
+		src/modules/rtsp/ghost_rtsp.c src/modules/ffmpeg_rx/ffmpeg_rx.c src/core/media_core.c \
 		$(LDFLAGS) $(URL_LIBS)
 
 stress-asan: stress_ghost_ndihx-asan
@@ -123,18 +137,20 @@ stress_ghost_ndihx-asan: tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndi
 
 install: install-lib install-viewer install-desktop
 
-install-lib: libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a
+install-lib: libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
 	install -m 644 include/media_core.h $(DESTDIR)$(PREFIX)/include/media_core.h
 	install -m 644 include/ghost_ndihx.h $(DESTDIR)$(PREFIX)/include/ghost_ndihx.h
 	install -m 644 include/ghost_srt.h $(DESTDIR)$(PREFIX)/include/ghost_srt.h
 	install -m 644 include/ghost_rtmp.h $(DESTDIR)$(PREFIX)/include/ghost_rtmp.h
+	install -m 644 include/ghost_rtsp.h $(DESTDIR)$(PREFIX)/include/ghost_rtsp.h
 	install -m 644 include/ffmpeg_rx.h $(DESTDIR)$(PREFIX)/include/ffmpeg_rx.h
 	install -m 644 libmedia_core.a $(DESTDIR)$(PREFIX)/lib/libmedia_core.a
 	install -m 644 libghost_ndihx.a $(DESTDIR)$(PREFIX)/lib/libghost_ndihx.a
 	install -m 644 libghost_ffmpeg_rx.a $(DESTDIR)$(PREFIX)/lib/libghost_ffmpeg_rx.a
 	install -m 644 libghost_srt.a $(DESTDIR)$(PREFIX)/lib/libghost_srt.a
 	install -m 644 libghost_rtmp.a $(DESTDIR)$(PREFIX)/lib/libghost_rtmp.a
+	install -m 644 libghost_rtsp.a $(DESTDIR)$(PREFIX)/lib/libghost_rtsp.a
 	rm -f $(DESTDIR)$(PREFIX)/include/ndi_hx.h $(DESTDIR)$(PREFIX)/lib/libndi_hx.a
 
 install-viewer: ghostvidstream
@@ -153,6 +169,6 @@ install-desktop: assets/ghostvidstream.png packaging/ghostvidstream.desktop
 
 clean:
 	rm -f ghostvidstream ndi-hx-viewer \
-		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a *.o \
-		stress_ghost_ndihx stress_ghost_ndihx-asan stress_url_rx \
+		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a *.o \
+		stress_ghost_ndihx stress_ghost_ndihx-asan stress_url_rx stress_url_rx-asan \
 		libndi_hx.a stress_ndi_hx stress_ndi_hx-asan
