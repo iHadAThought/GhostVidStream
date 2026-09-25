@@ -8,6 +8,8 @@
  * link that module directly (see docs/integration.md / modular-compatibility.md).
  */
 #include "ghost_ndihx.h"
+#include "ghost_rtmp.h"
+#include "ghost_srt.h"
 #include "media_core.h"
 
 #include <SDL.h>
@@ -19,10 +21,19 @@
 #include <unistd.h>
 
 #define PRODUCT_NAME "GhostVidStream"
-#define VIEWER_VERSION "0.4.0"
+#define VIEWER_VERSION "0.5.0"
+
+typedef enum {
+  VIEWER_PROTO_NDI_HX = 0,
+  VIEWER_PROTO_SRT = 1,
+  VIEWER_PROTO_RTMP = 2
+} ViewerProtocol;
 
 typedef struct {
   ghost_ndihx_options_t lib;
+  ghost_srt_options_t srt;
+  ghost_rtmp_options_t rtmp;
+  ViewerProtocol protocol;
   bool list_only;
   bool fullscreen;
   bool stats; /* HUD on at start when --stats */
@@ -372,15 +383,19 @@ static void layout_controls(SDL_Renderer *ren, UiState *ui, ViewerOptions *vo,
 static void usage(const char *argv0) {
   fprintf(stderr,
           "%s — multi-protocol video receive shell\n"
-          "First decoder plugin: libghost_ndihx (NDI|HX). Planned: FULL NDI, 2110, RTSP.\n"
+          "Decoders: libghost_ndihx (NDI|HX), srt, rtmp. Planned: FULL NDI, 2110, RTSP.\n"
           "Usage: %s [options]\n"
           "\n"
-          "Discovery / connect (active module: libghost_ndihx)\n"
+          "Protocol\n"
+          "  --protocol MODE     ghost_ndihx|ndi_hx|srt|rtmp  (default: ghost_ndihx)\n"
+          "  --url URL           Full srt:// or rtmp:// (or http://…flv) URL\n"
+          "\n"
+          "Discovery / connect\n"
           "  --list              List sources and exit\n"
           "  --auto / --no-auto  Keep searching (default: auto)\n"
           "  --source NAME       Prefer name/url substring\n"
-          "  --ip HOST           Prefer IP/host substring\n"
-          "  --any               Allow non-HX sources\n"
+          "  --ip HOST           Prefer IP/host substring (also builds default SRT/RTMP URLs)\n"
+          "  --any               Allow non-HX sources (NDI|HX module)\n"
           "  --find-ms N         Discovery wait ms (default 4000)\n"
           "  --rescan-ms N       Auto-search pause ms (default 3000)\n"
           "  --noframe-ms N      Reconnect if silent this long (default 8000)\n"
@@ -397,7 +412,7 @@ static void usage(const char *argv0) {
           "\n"
           "Keys: q/Esc quit · f fullscreen · Space pause · r rescan ·\n"
           "      c controls overlay · i stats HUD ·\n"
-          "      [/] bandwidth low/high · -/= fps-cap · 0 uncapped\n",
+          "      [/] bandwidth low/high (NDI|HX) · -/= fps-cap · 0 uncapped\n",
           PRODUCT_NAME, argv0, PRODUCT_NAME);
 }
 
@@ -528,6 +543,9 @@ static int load_config(ViewerOptions *vo, const char *path) {
 static void viewer_defaults(ViewerOptions *vo) {
   memset(vo, 0, sizeof(*vo));
   ghost_ndihx_options_defaults(&vo->lib);
+  ghost_srt_options_defaults(&vo->srt);
+  ghost_rtmp_options_defaults(&vo->rtmp);
+  vo->protocol = VIEWER_PROTO_NDI_HX;
   vo->noframe_ms = 8000;
 }
 
@@ -551,14 +569,38 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
       vo->stats = true;
     } else if (!strcmp(argv[i], "--auto")) {
       vo->lib.auto_search = true;
+      vo->srt.auto_search = true;
+      vo->rtmp.auto_search = true;
     } else if (!strcmp(argv[i], "--no-auto")) {
       vo->lib.auto_search = false;
+      vo->srt.auto_search = false;
+      vo->rtmp.auto_search = false;
     } else if (!strcmp(argv[i], "--any")) {
       vo->lib.prefer_hx = false;
     } else if (!strcmp(argv[i], "--source") && i + 1 < argc) {
       snprintf(vo->lib.source_substr, sizeof(vo->lib.source_substr), "%s", argv[++i]);
     } else if (!strcmp(argv[i], "--ip") && i + 1 < argc) {
       snprintf(vo->lib.ip_substr, sizeof(vo->lib.ip_substr), "%s", argv[++i]);
+      snprintf(vo->srt.ip_substr, sizeof(vo->srt.ip_substr), "%s", vo->lib.ip_substr);
+      snprintf(vo->rtmp.ip_substr, sizeof(vo->rtmp.ip_substr), "%s", vo->lib.ip_substr);
+    } else if (!strcmp(argv[i], "--protocol") && i + 1 < argc) {
+      const char *p = argv[++i];
+      if (!strcasecmp(p, "ghost_ndihx") || !strcasecmp(p, "ndi_hx") || !strcasecmp(p, "ndi-hx") ||
+          !strcasecmp(p, "ndi"))
+        vo->protocol = VIEWER_PROTO_NDI_HX;
+      else if (!strcasecmp(p, "srt"))
+        vo->protocol = VIEWER_PROTO_SRT;
+      else if (!strcasecmp(p, "rtmp"))
+        vo->protocol = VIEWER_PROTO_RTMP;
+      else {
+        fprintf(stderr, "Invalid --protocol (use ghost_ndihx|srt|rtmp)\n");
+        return false;
+      }
+    } else if (!strcmp(argv[i], "--url") && i + 1 < argc) {
+      const char *u = argv[++i];
+      snprintf(vo->srt.url, sizeof(vo->srt.url), "%s", u);
+      snprintf(vo->rtmp.url, sizeof(vo->rtmp.url), "%s", u);
+      snprintf(vo->lib.source_substr, sizeof(vo->lib.source_substr), "%s", u);
     } else if (!strcmp(argv[i], "--find-ms") && i + 1 < argc) {
       vo->lib.find_ms = atoi(argv[++i]);
     } else if (!strcmp(argv[i], "--rescan-ms") && i + 1 < argc) {
@@ -784,12 +826,211 @@ static bool handle_hit(HitId id, ViewerOptions *vo, UiState *ui, ghost_ndihx_ses
   }
 }
 
+static int run_url_protocol_viewer(ViewerOptions *vo) {
+  const char *mod_id = vo->protocol == VIEWER_PROTO_SRT ? "srt" : "rtmp";
+  const media_module_t *mod = media_find_module(mod_id);
+  if (!mod) {
+    fprintf(stderr, "module %s not registered\n", mod_id);
+    return 1;
+  }
+  mod->init();
+
+  media_open_params_t op;
+  media_open_params_defaults(&op);
+  op.auto_search = vo->protocol == VIEWER_PROTO_SRT ? vo->srt.auto_search : vo->rtmp.auto_search;
+  if (vo->protocol == VIEWER_PROTO_SRT) {
+    if (vo->lib.ip_substr[0] && !vo->srt.ip_substr[0])
+      snprintf(vo->srt.ip_substr, sizeof(vo->srt.ip_substr), "%s", vo->lib.ip_substr);
+    op.protocol_opts = &vo->srt;
+    snprintf(op.ip_substr, sizeof(op.ip_substr), "%s", vo->srt.ip_substr);
+  } else {
+    if (vo->lib.ip_substr[0] && !vo->rtmp.ip_substr[0])
+      snprintf(vo->rtmp.ip_substr, sizeof(vo->rtmp.ip_substr), "%s", vo->lib.ip_substr);
+    op.protocol_opts = &vo->rtmp;
+    snprintf(op.ip_substr, sizeof(op.ip_substr), "%s", vo->rtmp.ip_substr);
+  }
+
+  fprintf(stderr, "%s %s — multi-protocol shell (active decoder: %s, media_core %s)\n", PRODUCT_NAME,
+          VIEWER_VERSION, mod_id, media_core_version());
+
+  media_session_t *session = mod->open(&op);
+  if (!session) {
+    fprintf(stderr, "%s session open failed (FFmpeg / libsrt for SRT?)\n", mod_id);
+    return 1;
+  }
+
+  media_source_t sources[8];
+  int n = mod->discover(session, sources, 8, 1000);
+  if (n < 0)
+    n = 0;
+  printf("Discovered %d %s source(s):\n", n, mod_id);
+  for (int i = 0; i < n; i++)
+    printf("  [%d] %s  url=%s\n", i, sources[i].name, sources[i].url);
+  fflush(stdout);
+
+  if (vo->list_only) {
+    mod->close(session);
+    mod->shutdown();
+    return n > 0 ? 0 : 1;
+  }
+
+  if (mod->connect_auto(session, NULL) != 0) {
+    fprintf(stderr, "No matching %s source to connect\n", mod_id);
+    mod->close(session);
+    mod->shutdown();
+    return 1;
+  }
+
+  media_source_t connected;
+  mod->connected_source(session, &connected);
+  printf("Connecting to: %s (%s)\n", connected.name, connected.url);
+  fflush(stdout);
+
+  if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
+    fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
+    mod->close(session);
+    mod->shutdown();
+    return 1;
+  }
+
+  Uint32 win_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
+  if (vo->fullscreen)
+    win_flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+  int win_w = vo->max_w > 0 ? vo->max_w : 1280;
+  int win_h = vo->max_h > 0 ? vo->max_h : 720;
+  SDL_Window *win = SDL_CreateWindow(connected.name[0] ? connected.name : PRODUCT_NAME,
+                                     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, win_w, win_h,
+                                     win_flags);
+  SDL_Renderer *ren =
+      win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC) : NULL;
+  if (ren)
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+  if (!win || !ren) {
+    fprintf(stderr, "SDL window/renderer failed\n");
+    if (ren)
+      SDL_DestroyRenderer(ren);
+    if (win)
+      SDL_DestroyWindow(win);
+    SDL_Quit();
+    mod->close(session);
+    mod->shutdown();
+    return 1;
+  }
+
+  SDL_Texture *tex = NULL;
+  int tex_w = 0, tex_h = 0;
+  bool running = true, paused = false;
+  Uint32 fps_t0 = SDL_GetTicks();
+  int fps_frames = 0, fps_display = 0;
+
+  while (running) {
+    SDL_Event ev;
+    while (SDL_PollEvent(&ev)) {
+      if (ev.type == SDL_QUIT)
+        running = false;
+      else if (ev.type == SDL_KEYDOWN) {
+        SDL_Keycode k = ev.key.keysym.sym;
+        if (k == SDLK_q || k == SDLK_ESCAPE)
+          running = false;
+        else if (k == SDLK_f)
+          SDL_SetWindowFullscreen(win, (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN_DESKTOP)
+                                           ? 0
+                                           : SDL_WINDOW_FULLSCREEN_DESKTOP);
+        else if (k == SDLK_SPACE)
+          paused = !paused;
+        else if (k == SDLK_r) {
+          mod->disconnect(session);
+          mod->connect_auto(session, NULL);
+          mod->connected_source(session, &connected);
+        }
+      }
+    }
+
+    media_frame_t fr;
+    bool got = false;
+    if (!paused)
+      got = mod->capture_newest(session, &fr);
+    else if (mod_id[0]) {
+      /* Drain while paused when module supports it via native API */
+      if (vo->protocol == VIEWER_PROTO_SRT)
+        ghost_srt_drain((ghost_srt_session_t *)session);
+      else
+        ghost_rtmp_drain((ghost_rtmp_session_t *)session);
+    }
+
+    if (got && fr.data && fr.width > 0 && fr.height > 0) {
+      if (!tex || tex_w != fr.width || tex_h != fr.height) {
+        if (tex)
+          SDL_DestroyTexture(tex);
+        tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_BGRA32, SDL_TEXTUREACCESS_STREAMING, fr.width,
+                                fr.height);
+        tex_w = fr.width;
+        tex_h = fr.height;
+      }
+      if (tex) {
+        void *pixels;
+        int pitch;
+        if (SDL_LockTexture(tex, NULL, &pixels, &pitch) == 0) {
+          const uint8_t *src = fr.data;
+          uint8_t *dst = (uint8_t *)pixels;
+          int row = fr.width * 4;
+          for (int y = 0; y < fr.height; y++) {
+            memcpy(dst + y * pitch, src + y * fr.stride, (size_t)row);
+          }
+          SDL_UnlockTexture(tex);
+        }
+      }
+      fps_frames++;
+    }
+
+    int ww, wh;
+    SDL_GetRendererOutputSize(ren, &ww, &wh);
+    SDL_Rect dst;
+    compute_dst(tex_w, tex_h, ww, wh, vo->max_w, vo->max_h, &dst);
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    if (tex)
+      SDL_RenderCopy(ren, tex, NULL, &dst);
+    SDL_RenderPresent(ren);
+
+    Uint32 now = SDL_GetTicks();
+    if (now - fps_t0 >= 1000) {
+      fps_display = fps_frames;
+      fps_frames = 0;
+      fps_t0 = now;
+      char title[512];
+      snprintf(title, sizeof(title), "%s · %s · %s  %dx%d  %d fps%s", PRODUCT_NAME, mod_id,
+               connected.name[0] ? connected.name : "—", tex_w, tex_h, fps_display,
+               paused ? "  [paused]" : "");
+      SDL_SetWindowTitle(win, title);
+    }
+
+    if (vo->fps_cap > 0)
+      SDL_Delay((Uint32)(1000 / vo->fps_cap));
+  }
+
+  if (tex)
+    SDL_DestroyTexture(tex);
+  SDL_DestroyRenderer(ren);
+  SDL_DestroyWindow(win);
+  SDL_Quit();
+  mod->close(session);
+  mod->shutdown();
+  return 0;
+}
+
 int main(int argc, char **argv) {
   ViewerOptions vo;
   if (!parse_args(argc, argv, &vo))
     return 2;
 
   ghost_ndihx_register_media_module();
+  ghost_srt_register_media_module();
+  ghost_rtmp_register_media_module();
+
+  if (vo.protocol == VIEWER_PROTO_SRT || vo.protocol == VIEWER_PROTO_RTMP)
+    return run_url_protocol_viewer(&vo);
+
   /* Peer-visible receiver name on the LAN */
   if (!vo.lib.recv_name[0] || !strcmp(vo.lib.recv_name, GHOST_NDIHX_DEFAULT_RECV_NAME))
     snprintf(vo.lib.recv_name, sizeof(vo.lib.recv_name), "%s", PRODUCT_NAME);

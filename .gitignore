@@ -22,3 +22,9 @@ tmp/
 # Stress harness binaries
 /stress_ndi_hx
 /stress_ndi_hx-asan
+
+stress_url_rx
+ghostvidstream
+ndi-hx-viewer
+*.a
+*.o

@@ -90,6 +90,9 @@ Controls overlay also exposes auto-search, max W/H, rescan, stats checkbox, and 
 Steady-state CPU / RSS / threads on the aarch64 booth host (no stream · low ·
 max quality · HUD overlays): **[docs/resource-usage.md](docs/resource-usage.md)**.
 
+SRT / RTMP decoder bring-up vs AIDA camera:
+**[docs/srt-rtmp-decoder.md](docs/srt-rtmp-decoder.md)**.
+
 ## Embed / modules
 
 - **NDI\|HX only:** **[docs/integration.md](docs/integration.md)** (`libghost_ndihx`)

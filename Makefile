@@ -1,21 +1,8 @@
 # GhostVidStream — portable aarch64 + x86_64
 #
 # Product / UI: GhostVidStream (SDL viewer + desktop launcher)
-# Library:      libghost_ndihx  (header ghost_ndihx.h, API ghost_ndihx_*)
+# Modules:      libghost_ndihx (NDI|HX), libghost_srt, libghost_rtmp (+ ffmpeg_rx)
 # Protocol core: libmedia_core
-#
-# Layout (modular-ready):
-#   include/media_core.h
-#   include/ghost_ndihx.h
-#   src/core/media_core.c
-#   src/modules/ghost_ndihx/   NDI|HX module (first)
-#   src/modules/{ndi_full,st2110,rtsp}/  placeholders
-#   src/viewer_main.c          GhostVidStream SDL app
-#   assets/ghostvidstream.png
-#   packaging/ghostvidstream.desktop
-#
-# Builds: libmedia_core.a + libghost_ndihx.a + ghostvidstream
-#          (+ ndi-hx-viewer → ghostvidstream symlink for old habits)
 
 PREFIX      ?= /usr/local
 CC          ?= gcc
@@ -28,6 +15,7 @@ LDFLAGS     ?=
 LDFLAGS     += -L$(PREFIX)/lib -Wl,-rpath,$(PREFIX)/lib
 
 UNAME_M := $(shell uname -m)
+UNAME_S := $(shell uname -s)
 
 SDL_CFLAGS := $(shell $(PKG_CONFIG) --cflags sdl2 2>/dev/null)
 SDL_LIBS   := $(shell $(PKG_CONFIG) --libs sdl2 2>/dev/null)
@@ -35,14 +23,45 @@ ifeq ($(SDL_LIBS),)
   SDL_LIBS := -lSDL2
 endif
 
+FFMPEG_CFLAGS := $(shell $(PKG_CONFIG) --cflags libavformat libavcodec libavutil libswscale 2>/dev/null)
+FFMPEG_LIBS   := $(shell $(PKG_CONFIG) --libs libavformat libavcodec libavutil libswscale 2>/dev/null)
+
+# libsrt is required for SRT demux at runtime (FFmpeg built with --enable-libsrt)
+SRT_LIBS := $(shell $(PKG_CONFIG) --libs srt 2>/dev/null)
+
 NDI_LIBS := -lndi -ldl -lpthread -lm
+ifeq ($(UNAME_S),Darwin)
+  # Homebrew keg-only ffmpeg-full / srt
+  ifneq ($(wildcard /opt/homebrew/opt/ffmpeg-full/lib/pkgconfig),)
+    export PKG_CONFIG_PATH := /opt/homebrew/opt/ffmpeg-full/lib/pkgconfig:/opt/homebrew/opt/srt/lib/pkgconfig:/opt/homebrew/lib/pkgconfig:$(PKG_CONFIG_PATH)
+    FFMPEG_CFLAGS := $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" $(PKG_CONFIG) --cflags libavformat libavcodec libavutil libswscale 2>/dev/null)
+    FFMPEG_LIBS   := $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" $(PKG_CONFIG) --libs libavformat libavcodec libavutil libswscale 2>/dev/null)
+    SRT_LIBS := $(shell PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" $(PKG_CONFIG) --libs srt 2>/dev/null)
+  endif
+  ifneq ($(wildcard /opt/homebrew/opt/srt/lib),)
+    LDFLAGS += -L/opt/homebrew/opt/srt/lib -Wl,-rpath,/opt/homebrew/opt/srt/lib
+  endif
+  ifneq ($(wildcard /opt/homebrew/opt/ffmpeg-full/lib),)
+    LDFLAGS += -L/opt/homebrew/opt/ffmpeg-full/lib -Wl,-rpath,/opt/homebrew/opt/ffmpeg-full/lib
+    CFLAGS  += -I/opt/homebrew/opt/ffmpeg-full/include
+  endif
+endif
+
+ifeq ($(FFMPEG_LIBS),)
+  FFMPEG_LIBS := -lavformat -lavcodec -lavutil -lswscale
+endif
+ifeq ($(SRT_LIBS),)
+  SRT_LIBS := -lsrt
+endif
+
+URL_LIBS := $(FFMPEG_LIBS) $(SRT_LIBS) -lpthread -lm
 
 DESKTOP_DIR := $(DESTDIR)$(PREFIX)/share/applications
 ICON_DIR    := $(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps
 
-.PHONY: all clean install install-lib install-viewer install-desktop info stress stress-asan
+.PHONY: all clean install install-lib install-viewer install-desktop info stress stress-asan stress-url
 
-all: info libmedia_core.a libghost_ndihx.a ghostvidstream
+all: info libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a ghostvidstream
 
 info:
 	@echo "Building GhostVidStream for arch=$(UNAME_M) PREFIX=$(PREFIX)"
@@ -57,13 +76,28 @@ libghost_ndihx.a: src/modules/ghost_ndihx/ghost_ndihx.c include/ghost_ndihx.h in
 	$(AR) rcs $@ ghost_ndihx.o
 	rm -f ghost_ndihx.o
 
-ghostvidstream: src/viewer_main.c libghost_ndihx.a libmedia_core.a include/ghost_ndihx.h include/media_core.h
-	$(CC) $(CFLAGS) $(SDL_CFLAGS) -o $@ src/viewer_main.c \
-		libghost_ndihx.a libmedia_core.a \
-		$(LDFLAGS) $(NDI_LIBS) $(SDL_LIBS)
+libghost_ffmpeg_rx.a: src/modules/ffmpeg_rx/ffmpeg_rx.c include/ffmpeg_rx.h
+	$(CC) $(CFLAGS) $(FFMPEG_CFLAGS) -c -o ffmpeg_rx.o src/modules/ffmpeg_rx/ffmpeg_rx.c
+	$(AR) rcs $@ ffmpeg_rx.o
+	rm -f ffmpeg_rx.o
+
+libghost_srt.a: src/modules/srt/ghost_srt.c include/ghost_srt.h include/ffmpeg_rx.h include/media_core.h libghost_ffmpeg_rx.a libmedia_core.a
+	$(CC) $(CFLAGS) -c -o ghost_srt.o src/modules/srt/ghost_srt.c
+	$(AR) rcs $@ ghost_srt.o
+	rm -f ghost_srt.o
+
+libghost_rtmp.a: src/modules/rtmp/ghost_rtmp.c include/ghost_rtmp.h include/ffmpeg_rx.h include/media_core.h libghost_ffmpeg_rx.a libmedia_core.a
+	$(CC) $(CFLAGS) -c -o ghost_rtmp.o src/modules/rtmp/ghost_rtmp.c
+	$(AR) rcs $@ ghost_rtmp.o
+	rm -f ghost_rtmp.o
+
+ghostvidstream: src/viewer_main.c libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		include/ghost_ndihx.h include/ghost_srt.h include/ghost_rtmp.h include/media_core.h
+	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(FFMPEG_CFLAGS) -o $@ src/viewer_main.c \
+		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		$(LDFLAGS) $(NDI_LIBS) $(URL_LIBS) $(SDL_LIBS)
 	ln -sfn ghostvidstream ndi-hx-viewer
 
-# Legacy alias target
 ndi-hx-viewer: ghostvidstream
 
 stress: stress_ghost_ndihx
@@ -72,6 +106,13 @@ stress_ghost_ndihx: tests/stress/stress_ghost_ndihx.c libghost_ndihx.a libmedia_
 	$(CC) $(CFLAGS) -o $@ tests/stress/stress_ghost_ndihx.c \
 		libghost_ndihx.a libmedia_core.a \
 		$(LDFLAGS) $(NDI_LIBS)
+
+stress-url: stress_url_rx
+
+stress_url_rx: tests/stress/stress_url_rx.c libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a
+	$(CC) $(CFLAGS) $(FFMPEG_CFLAGS) -o $@ tests/stress/stress_url_rx.c \
+		libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		$(LDFLAGS) $(URL_LIBS)
 
 stress-asan: stress_ghost_ndihx-asan
 
@@ -82,13 +123,18 @@ stress_ghost_ndihx-asan: tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndi
 
 install: install-lib install-viewer install-desktop
 
-install-lib: libmedia_core.a libghost_ndihx.a
+install-lib: libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
 	install -m 644 include/media_core.h $(DESTDIR)$(PREFIX)/include/media_core.h
 	install -m 644 include/ghost_ndihx.h $(DESTDIR)$(PREFIX)/include/ghost_ndihx.h
+	install -m 644 include/ghost_srt.h $(DESTDIR)$(PREFIX)/include/ghost_srt.h
+	install -m 644 include/ghost_rtmp.h $(DESTDIR)$(PREFIX)/include/ghost_rtmp.h
+	install -m 644 include/ffmpeg_rx.h $(DESTDIR)$(PREFIX)/include/ffmpeg_rx.h
 	install -m 644 libmedia_core.a $(DESTDIR)$(PREFIX)/lib/libmedia_core.a
 	install -m 644 libghost_ndihx.a $(DESTDIR)$(PREFIX)/lib/libghost_ndihx.a
-	# Remove superseded library/header names if present from older installs
+	install -m 644 libghost_ffmpeg_rx.a $(DESTDIR)$(PREFIX)/lib/libghost_ffmpeg_rx.a
+	install -m 644 libghost_srt.a $(DESTDIR)$(PREFIX)/lib/libghost_srt.a
+	install -m 644 libghost_rtmp.a $(DESTDIR)$(PREFIX)/lib/libghost_rtmp.a
 	rm -f $(DESTDIR)$(PREFIX)/include/ndi_hx.h $(DESTDIR)$(PREFIX)/lib/libndi_hx.a
 
 install-viewer: ghostvidstream
@@ -106,6 +152,7 @@ install-desktop: assets/ghostvidstream.png packaging/ghostvidstream.desktop
 	-update-desktop-database $(DESTDIR)$(PREFIX)/share/applications 2>/dev/null || true
 
 clean:
-	rm -f ghostvidstream ndi-hx-viewer libghost_ndihx.a libmedia_core.a *.o \
-		stress_ghost_ndihx stress_ghost_ndihx-asan \
+	rm -f ghostvidstream ndi-hx-viewer \
+		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_ffmpeg_rx.a libmedia_core.a *.o \
+		stress_ghost_ndihx stress_ghost_ndihx-asan stress_url_rx \
 		libndi_hx.a stress_ndi_hx stress_ndi_hx-asan
