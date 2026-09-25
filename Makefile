@@ -2,6 +2,7 @@
 #
 # Product / UI: GhostVidStream (SDL viewer + desktop launcher)
 # Modules:      libghost_ndihx (NDI|HX), libghost_srt, libghost_rtmp, libghost_rtsp (+ ffmpeg_rx)
+# Discovery:    libghost_discover (Bonjour / NDI SDK backends)
 # Protocol core: libmedia_core
 
 PREFIX      ?= /usr/local
@@ -56,6 +57,15 @@ ifeq ($(UNAME_S),Darwin)
     LDFLAGS += -L/opt/homebrew/opt/ffmpeg-full/lib -Wl,-rpath,/opt/homebrew/opt/ffmpeg-full/lib
     CFLAGS  += -I/opt/homebrew/opt/ffmpeg-full/include
   endif
+  # Bonjour (dns_sd) is in libSystem on Darwin — no extra link flags.
+  MDNS_CFLAGS :=
+  MDNS_LIBS :=
+else
+  MDNS_CFLAGS := $(shell $(PKG_CONFIG) --cflags avahi-client 2>/dev/null)
+  MDNS_LIBS := $(shell $(PKG_CONFIG) --libs avahi-client 2>/dev/null)
+  ifeq ($(MDNS_LIBS),)
+    MDNS_LIBS := -lavahi-client -lavahi-common
+  endif
 endif
 
 ifeq ($(FFMPEG_LIBS),)
@@ -72,7 +82,7 @@ ICON_DIR    := $(DESTDIR)$(PREFIX)/share/icons/hicolor/512x512/apps
 
 .PHONY: all clean install install-lib install-viewer install-desktop info stress stress-asan stress-url stress-url-asan
 
-all: info libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a ghostvidstream
+all: info libmedia_core.a libghost_discover.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a ghostvidstream
 
 info:
 	@echo "Building GhostVidStream for arch=$(UNAME_M) PREFIX=$(PREFIX)"
@@ -82,7 +92,18 @@ libmedia_core.a: src/core/media_core.c include/media_core.h
 	$(AR) rcs $@ media_core.o
 	rm -f media_core.o
 
-libghost_ndihx.a: src/modules/ghost_ndihx/ghost_ndihx.c include/ghost_ndihx.h include/media_core.h libmedia_core.a
+libghost_discover.a: src/modules/discover/ghost_discover.c \
+		src/modules/discover/ghost_discover_bonjour.c \
+		src/modules/discover/ghost_discover_ndi_sdk.c \
+		include/ghost_discover.h
+	$(CC) $(CFLAGS) $(MDNS_CFLAGS) -c -o ghost_discover.o src/modules/discover/ghost_discover.c
+	$(CC) $(CFLAGS) $(MDNS_CFLAGS) -c -o ghost_discover_bonjour.o src/modules/discover/ghost_discover_bonjour.c
+	$(CC) $(CFLAGS) $(MDNS_CFLAGS) -c -o ghost_discover_ndi_sdk.o src/modules/discover/ghost_discover_ndi_sdk.c
+	$(AR) rcs $@ ghost_discover.o ghost_discover_bonjour.o ghost_discover_ndi_sdk.o
+	rm -f ghost_discover.o ghost_discover_bonjour.o ghost_discover_ndi_sdk.o
+
+libghost_ndihx.a: src/modules/ghost_ndihx/ghost_ndihx.c include/ghost_ndihx.h include/ghost_discover.h include/media_core.h \
+		libmedia_core.a libghost_discover.a
 	$(CC) $(CFLAGS) -c -o ghost_ndihx.o src/modules/ghost_ndihx/ghost_ndihx.c
 	$(AR) rcs $@ ghost_ndihx.o
 	rm -f ghost_ndihx.o
@@ -107,21 +128,22 @@ libghost_rtsp.a: src/modules/rtsp/ghost_rtsp.c include/ghost_rtsp.h include/ffmp
 	rm -f ghost_rtsp.o
 
 
-ghostvidstream: src/viewer_main.c libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
-		include/ghost_ndihx.h include/ghost_srt.h include/ghost_rtmp.h include/ghost_rtsp.h include/media_core.h
+ghostvidstream: src/viewer_main.c libghost_ndihx.a libghost_discover.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a \
+		libghost_ffmpeg_rx.a libmedia_core.a \
+		include/ghost_ndihx.h include/ghost_discover.h include/ghost_srt.h include/ghost_rtmp.h include/ghost_rtsp.h include/media_core.h
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) $(FFMPEG_CFLAGS) -o $@ src/viewer_main.c \
-		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
-		$(LDFLAGS) $(NDI_LIBS) $(URL_LIBS) $(SDL_LIBS)
+		libghost_ndihx.a libghost_discover.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a \
+		$(LDFLAGS) $(NDI_LIBS) $(MDNS_LIBS) $(URL_LIBS) $(SDL_LIBS)
 	ln -sfn ghostvidstream ndi-hx-viewer
 
 ndi-hx-viewer: ghostvidstream
 
 stress: stress_ghost_ndihx
 
-stress_ghost_ndihx: tests/stress/stress_ghost_ndihx.c libghost_ndihx.a libmedia_core.a
+stress_ghost_ndihx: tests/stress/stress_ghost_ndihx.c libghost_ndihx.a libghost_discover.a libmedia_core.a
 	$(CC) $(CFLAGS) -o $@ tests/stress/stress_ghost_ndihx.c \
-		libghost_ndihx.a libmedia_core.a \
-		$(LDFLAGS) $(NDI_LIBS)
+		libghost_ndihx.a libghost_discover.a libmedia_core.a \
+		$(LDFLAGS) $(NDI_LIBS) $(MDNS_LIBS)
 
 stress-url: stress_url_rx
 
@@ -141,22 +163,28 @@ stress_url_rx-asan: tests/stress/stress_url_rx.c src/modules/srt/ghost_srt.c src
 
 stress-asan: stress_ghost_ndihx-asan
 
-stress_ghost_ndihx-asan: tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndihx/ghost_ndihx.c src/core/media_core.c
-	$(CC) $(CFLAGS) -O1 -g -fsanitize=address -fno-omit-frame-pointer \
-		-o $@ tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndihx/ghost_ndihx.c src/core/media_core.c \
-		$(LDFLAGS) $(NDI_LIBS)
+stress_ghost_ndihx-asan: tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndihx/ghost_ndihx.c \
+		src/modules/discover/ghost_discover.c src/modules/discover/ghost_discover_bonjour.c \
+		src/modules/discover/ghost_discover_ndi_sdk.c src/core/media_core.c
+	$(CC) $(CFLAGS) $(MDNS_CFLAGS) -O1 -g -fsanitize=address -fno-omit-frame-pointer \
+		-o $@ tests/stress/stress_ghost_ndihx.c src/modules/ghost_ndihx/ghost_ndihx.c \
+		src/modules/discover/ghost_discover.c src/modules/discover/ghost_discover_bonjour.c \
+		src/modules/discover/ghost_discover_ndi_sdk.c src/core/media_core.c \
+		$(LDFLAGS) $(NDI_LIBS) $(MDNS_LIBS)
 
 install: install-lib install-viewer install-desktop
 
-install-lib: libmedia_core.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a
+install-lib: libmedia_core.a libghost_discover.a libghost_ndihx.a libghost_ffmpeg_rx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a
 	install -d $(DESTDIR)$(PREFIX)/include $(DESTDIR)$(PREFIX)/lib
 	install -m 644 include/media_core.h $(DESTDIR)$(PREFIX)/include/media_core.h
+	install -m 644 include/ghost_discover.h $(DESTDIR)$(PREFIX)/include/ghost_discover.h
 	install -m 644 include/ghost_ndihx.h $(DESTDIR)$(PREFIX)/include/ghost_ndihx.h
 	install -m 644 include/ghost_srt.h $(DESTDIR)$(PREFIX)/include/ghost_srt.h
 	install -m 644 include/ghost_rtmp.h $(DESTDIR)$(PREFIX)/include/ghost_rtmp.h
 	install -m 644 include/ghost_rtsp.h $(DESTDIR)$(PREFIX)/include/ghost_rtsp.h
 	install -m 644 include/ffmpeg_rx.h $(DESTDIR)$(PREFIX)/include/ffmpeg_rx.h
 	install -m 644 libmedia_core.a $(DESTDIR)$(PREFIX)/lib/libmedia_core.a
+	install -m 644 libghost_discover.a $(DESTDIR)$(PREFIX)/lib/libghost_discover.a
 	install -m 644 libghost_ndihx.a $(DESTDIR)$(PREFIX)/lib/libghost_ndihx.a
 	install -m 644 libghost_ffmpeg_rx.a $(DESTDIR)$(PREFIX)/lib/libghost_ffmpeg_rx.a
 	install -m 644 libghost_srt.a $(DESTDIR)$(PREFIX)/lib/libghost_srt.a
@@ -180,6 +208,6 @@ install-desktop: assets/ghostvidstream.png packaging/ghostvidstream.desktop
 
 clean:
 	rm -f ghostvidstream ndi-hx-viewer \
-		libghost_ndihx.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a *.o \
+		libghost_ndihx.a libghost_discover.a libghost_srt.a libghost_rtmp.a libghost_rtsp.a libghost_ffmpeg_rx.a libmedia_core.a *.o \
 		stress_ghost_ndihx stress_ghost_ndihx-asan stress_url_rx stress_url_rx-asan \
 		libndi_hx.a stress_ndi_hx stress_ndi_hx-asan

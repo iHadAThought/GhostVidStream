@@ -412,6 +412,7 @@ static void usage(const char *argv0) {
           "  --source NAME       Prefer name/url substring\n"
           "  --ip HOST           Prefer IP/host substring (also builds default SRT/RTMP URLs)\n"
           "  --any               Allow non-HX sources (NDI|HX module)\n"
+          "  --discover MODE     auto|bonjour|ndi_sdk  (default: auto)\n"
           "  --find-ms N         Discovery wait ms (default 4000)\n"
           "  --rescan-ms N       Auto-search pause ms (default 3000)\n"
           "  --noframe-ms N      Reconnect if silent this long (default 8000)\n"
@@ -664,6 +665,13 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
       snprintf(vo->rtmp.url, sizeof(vo->rtmp.url), "%s", u);
       snprintf(vo->rtsp.url, sizeof(vo->rtsp.url), "%s", u);
       snprintf(vo->lib.source_substr, sizeof(vo->lib.source_substr), "%s", u);
+    } else if (!strcmp(argv[i], "--discover") && i + 1 < argc) {
+      ghost_discover_backend_id_t id;
+      if (!ghost_discover_backend_parse(argv[++i], &id)) {
+        fprintf(stderr, "Invalid --discover (use auto|bonjour|ndi_sdk)\n");
+        return false;
+      }
+      vo->lib.discover_backend = id;
     } else if (!strcmp(argv[i], "--find-ms") && i + 1 < argc) {
       vo->lib.find_ms = atoi(argv[++i]);
     } else if (!strcmp(argv[i], "--rescan-ms") && i + 1 < argc) {
@@ -703,12 +711,13 @@ static bool parse_args(int argc, char **argv, ViewerOptions *vo) {
 }
 
 static void print_sources(const ghost_ndihx_source_t *sources, int n) {
-  printf("Discovered %d NDI source(s):\n", n);
+  printf("Discovered %d NDI source(s) via libghost_discover:\n", n);
   for (int i = 0; i < n; i++) {
-    printf("  [%d] %s  url=%s%s\n", i, sources[i].name[0] ? sources[i].name : "?",
-           sources[i].url[0] ? sources[i].url : "?", sources[i].is_hx ? "  [HX]" : "");
+    const char *be = sources[i].backend[0] ? sources[i].backend : "?";
+    printf("  [%d] %s  url=%s%s  [%s%s]\n", i, sources[i].name[0] ? sources[i].name : "?",
+           sources[i].url[0] ? sources[i].url : "?", sources[i].is_hx ? "  [HX]" : "", be,
+           sources[i].via_mdns ? "+mdns" : "");
   }
-  fflush(stdout);
 }
 
 static void compute_dst(int tex_w, int tex_h, int ww, int wh, int max_w, int max_h,
@@ -1111,8 +1120,11 @@ int main(int argc, char **argv) {
   if (!vo.lib.recv_name[0] || !strcmp(vo.lib.recv_name, GHOST_NDIHX_DEFAULT_RECV_NAME))
     snprintf(vo.lib.recv_name, sizeof(vo.lib.recv_name), "%s", PRODUCT_NAME);
 
-  fprintf(stderr, "%s %s — multi-protocol shell (active decoder: libghost_ndihx %s, media_core %s)\n",
-          PRODUCT_NAME, VIEWER_VERSION, ghost_ndihx_version(), media_core_version());
+  fprintf(stderr,
+          "%s %s — multi-protocol shell (active decoder: libghost_ndihx %s, media_core %s, "
+          "discover=%s / libghost_discover %s)\n",
+          PRODUCT_NAME, VIEWER_VERSION, ghost_ndihx_version(), media_core_version(),
+          ghost_discover_backend_name(vo.lib.discover_backend), ghost_discover_version());
 
   ghost_ndihx_session_t *session = ghost_ndihx_session_create(&vo.lib);
   if (!session) {
