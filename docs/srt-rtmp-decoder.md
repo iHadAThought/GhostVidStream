@@ -84,3 +84,7 @@ Full NDI|HX CPU/RSS table remains in `docs/resource-usage.md`.
 ## BookStack
 
 GhostVidStream + libghost_ndihx Change logs updated for this feature set.
+
+## Bake-off
+
+See [decoder-bakeoff-ubuntu.md](decoder-bakeoff-ubuntu.md) for Ghost modules vs Ubuntu apt ffmpeg on `172.16.1.144`.
